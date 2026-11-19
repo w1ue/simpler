@@ -130,8 +130,15 @@ scope remain unchanged.
 
 ## Limits
 
+The source-tree [programmable persistent decode simulator](../../../examples/wse/persistent_decode/README.md)
+is a separate C++ logical execution component under `runtime/persistent` and
+`platform/sim/persistent`. It adds bounded batcher transport, owner-checked
+SRAM/Bailu storage and a scaled 40-layer numerical fixture. Its standalone
+CMake/CTest entry does not run through the ordinary Worker/HBG backend described
+above. Its ticks express event order, not hardware time.
+
 This is CPU functional simulation, not instruction timing, physical register
-allocation or hardware execution. Communication engines, execution-fault
+allocation or hardware execution. In the ordinary Worker backend, communication engines, execution-fault
 recovery and forced kernel interruption are outside this backend. The supported
 user path is direct L2 WSE execution with `host_build_graph`. Whole-device SRAM
 ownership does not imply support for arbitrary Host-pointer task inputs; supply
