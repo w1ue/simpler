@@ -12,7 +12,7 @@ project(wse_persistent_sim LANGUAGES CXX)
 
 get_filename_component(SIMPLER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." ABSOLUTE)
 set(PERSISTENT_RUNTIME "${SIMPLER_ROOT}/src/wse/runtime/persistent")
-add_library(wse_persistent STATIC device.cpp "${PERSISTENT_RUNTIME}/decode.cpp")
+add_library(wse_persistent STATIC device.cpp "${PERSISTENT_RUNTIME}/decode.cpp" "${PERSISTENT_RUNTIME}/prefill_state.cpp")
 target_include_directories(wse_persistent PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${PERSISTENT_RUNTIME}"
     "${SIMPLER_ROOT}/src/wse/platform/include")
 target_compile_features(wse_persistent PUBLIC cxx_std_17)

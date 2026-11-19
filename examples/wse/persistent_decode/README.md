@@ -1,8 +1,8 @@
 # Programmable persistent decode simulation
 
 This source-tree C++ simulator executes a complete scaled decode flow in the
-WSE logical backend. It runs actual dense numeric operations, processes the
-prompt, feeds sampled tokens back into the device service, drains KV writes,
+WSE logical backend. It imports externally computed prefill state, runs actual
+dense decode operations, feeds sampled tokens back into the device service, drains KV writes,
 and retires requests. Its program image is configurable before service launch.
 
 It is a **scaled structural fixture**, with synthetic deterministic weights.
@@ -32,24 +32,28 @@ previously installed simpler wheel. The ordinary Python Worker path retains
 its existing package installation requirements.
 
 `run.sh` builds a Release binary and runs both CTest entries: protocol checks,
-then eight numerical scenarios and three expected failures. Outputs are in
+then eleven numerical scenarios and thirteen expected failures. The test driver
+computes prefill outside the WSE executable using the NumPy fixture producer.
+Outputs are in
 `build/wse-persistent/validation/`:
 
 | File | Meaning |
 | --- | --- |
 | `validation.json` | All numerical and rejection scenario checks |
+| `external_prefill/*.wsepf`, `external_prefill/manifest.json` | External prefill snapshots and producer metadata |
 | `single/results.json`, `multi/results.json` | Tokens, logits, layer checksums, final KV/key/window/state, region peaks |
 | `single/events.jsonl`, `multi/events.jsonl` | One event per transfer stage or request observation point |
 | `single/programs.json`, `multi/programs.json` | Request AICore, expert/lookup service, and batcher instruction images |
 | `single/checks.json`, `multi/checks.json` | Independent NumPy comparison and lifecycle assertions |
 
-Individual runs use the same binary:
+Individual runs explicitly separate external prefill and WSE decode:
 
 ```bash
-build/wse-persistent/wse_decode_sim --single --output build/decode-single
-build/wse-persistent/wse_decode_sim --multi --output build/decode-multi
-build/wse-persistent/wse_decode_sim --single --custom-core --output build/decode-custom
-build/wse-persistent/wse_decode_sim --multi --custom-batcher --output build/decode-batcher
+.venv/bin/python examples/wse/persistent_decode/prefill.py --output build/prefill
+build/wse-persistent/wse_decode_sim --prefill-dir build/prefill --single --output build/decode-single
+build/wse-persistent/wse_decode_sim --prefill-dir build/prefill --multi --output build/decode-multi
+build/wse-persistent/wse_decode_sim --prefill-dir build/prefill --single --custom-core --output build/decode-custom
+build/wse-persistent/wse_decode_sim --prefill-dir build/prefill --multi --custom-batcher --output build/decode-batcher
 .venv/bin/python examples/wse/persistent_decode/reference.py build/decode-multi
 ```
 
@@ -64,7 +68,7 @@ registries are installed before `run()`.
 
 | Actor | Installed with | Default operations |
 | --- | --- | --- |
-| Request AICore | `set_core_program()` | 10 embed, 11 prepare/lookup, 12 index, 13 gather, 14 attention, 15 router, 16 dispatch, 17 combine, 18 advance layer, 19 sample |
+| Request AICore | `set_core_program()` | 20 import prefill, then 10 embed, 11 prepare/lookup, 12 index, 13 gather, 14 attention, 15 router, 16 dispatch, 17 combine, 18 advance layer, 19 sample |
 | Expert/lookup AICore | `set_service_program()` | 30 compute at the fixed weight/table owner, 31 send result |
 | Batcher endpoint | `set_batcher_program()` | 1 acquire destination credit, 2 submit copy, 3 await delivery, 4 publish notification |
 
@@ -72,15 +76,17 @@ For example, an AICore extension can transform the four-stream hidden state
 before LM-head sampling:
 
 ```cpp
-DecodeSimulation simulation;
+DecodeConfig config;
+DecodeSimulation simulation(config);
 auto image = default_core_program();
 image.name = "decode_with_head_transform";
-image.code.insert(image.code.begin() + 9, {InstructionKind::Invoke, 100, 0});
+image.code.insert(image.code.begin() + 10, {InstructionKind::Invoke, 100, 0});
 simulation.register_core_operation(100, [](Values &streams) {
     for (auto &value : streams) value += 0.125;
 });
 simulation.set_core_program(std::move(image));
-simulation.add_request({"request", 0, 0, {1, 4, 7}, 4, "", 0});
+auto state = PrefillState::load("build/prefill/A.wsepf", config);
+simulation.add_request({"request", 0, 0, std::move(state), 4, "", 0});
 simulation.run();
 ```
 
@@ -122,8 +128,10 @@ rows, request lengths, and message readiness are dynamic.
 
 ```mermaid
 flowchart LR
-    H[Host: preload weights and request trace] --> S[One logical service launch]
-    S --> A[Home AICore: prompt / token / 40 layers]
+    P[External prefill producer] --> H[Host: snapshots, weights, request trace]
+    H --> S[One logical service launch]
+    S --> I[Batcher: import snapshot to Bailu and SRAM]
+    I --> A[Home AICore: decode tokens / 40 layers]
     A --> K[SRAM: windows, keys, compressor states, dirty KV tail]
     K --> B[Batcher: credit, copy, delivery, publication]
     B --> C[Bailu: sealed compressed KV pages]
@@ -136,11 +144,25 @@ flowchart LR
     T --> A
 ```
 
-The prompt runs as causal streaming prefill on the same service. At the last
-prompt position, the initial sampled token is recorded as `prefill_next_token`.
-Pending prefill transfers drain before `PREFILL_READY`. Each configured
-`decode_inputs` pass then processes the current token and samples its successor.
-Thus the final sampled token has no KV until another input pass processes it.
+The WSE executable never processes prompt positions. The external NumPy fixture
+producer processes the prompt and exports the first sampled token together with
+the complete continuation state. This producer is a test/reference tool, not a
+production prefill runtime. The C++ loader validates the snapshot before launch;
+the first request instruction imports its payload through the batcher. Only
+after every chunk is delivered, published and consumed does `PREFILL_IMPORTED`
+allow embedding the first decode input at position `prompt_length`.
+
+All finite-trace snapshots are staged in simulated Host regions before service
+launch, including snapshots for requests admitted later. No live external
+producer connection is modeled. Each configured `decode_inputs` pass processes
+the current token and samples its successor. `prefill_next_token` is the first
+decode input; the final sampled successor has no KV until another input pass.
+
+The [snapshot format and import contract](prefill-state.md) cover history KV,
+keys, all layer windows, C2A state rings, token history and the first decode token.
+Full historical pages import directly to Bailu; partial tails, keys, windows and
+states import to owner SRAM. Logical metadata is bound by the preloaded request
+trace, and physical handles and generation are assigned by the receiver.
 
 KV lifecycle:
 
@@ -168,14 +190,15 @@ leases, publication order and mailbox credits are enforced. Bailu is not
 directly readable by compute operations.
 
 The simulator accounts allocations in 16 MiB/core SRAM, 64 MiB/chip Bailu and
-64 KiB/endpoint batcher regions. Batcher descriptors and request scratch use
+64 KiB/endpoint batcher regions, plus 128 MiB/chip Host staging. Host payload
+buffers are released after import consumption. Batcher descriptors and request scratch use
 fixed allowances; C++ actor objects, extracted working vectors and verification
 snapshots are host-side simulator storage. These peaks are fixture diagnostics,
 not a complete physical placement or metadata capacity certificate.
 
 ## Scenarios and remaining scope
 
-Single request A has seven prompt inputs and four decode inputs. Multi-request
+Single request A imports a seven-token prompt state and runs four decode inputs. Multi-request
 A/B start together with prompt lengths 7/13; C1 enters a different slot after
 A's second output; C2 reuses A's slot only after A drains. C1/C2 have prompt
 lengths 3/5 and two decode inputs each. Multi-request output includes 12 decode
@@ -184,15 +207,24 @@ successors. Cancellation stops B at a completed token boundary.
 The independent NumPy reference has dense history arrays and no page map or
 simulated transport. Checks compare sampled tokens, logits, every layer's
 checksum, compressed KV/key rows, all layer windows and C2A state rings. Trace
+checks reject any prompt computation on WSE and require import completion before
+the first decode input. `kv_rows_committed` counts only new decode rows;
+`prefill_kv_rows_imported` counts historical rows. `prefill_import_bytes` and
+`decode_bytes_transferred` split total fabric bytes. External prefill computation
+is outside all WSE counters. Layer checksums cover only decode positions. Trace
 checks require every transfer to pass send, copy, delivery, publication and
-consume in order. Reverse endpoint stepping, one-credit backpressure and a
+consume in order. Receiver repaging to two-row pages, reverse endpoint stepping, one-credit backpressure and a
 custom batcher program must preserve results. A modified AICore program must
 change logits. Maximum-context tests accept total length 11 and reject that
 request when the limit is 10 (the A request needs 7 + 4 = 11).
+One-token and eight-token prefixes cover short state, odd/even C2A continuation,
+window wrap and a full KV-page boundary. Corrupt checksums, versions, model
+contracts, row counts, windows, tokens, state truncation and nonfinite payloads
+are rejected before service launch.
 
 Still outside this executable: full 144-core/chip geometry, four PE execution
 within a core, 2D mesh routing/link contention, maximum-million-token capacity,
-pregranted page-pool quotas, external prefill snapshot ingestion, arbitrary
+pregranted page-pool quotas, live prefill-provider integration, arbitrary
 in-flight cancellation/fault recovery, strict-versus-grouped strategy comparison,
 native Worker/HBG integration, full checkpoint numerical validation and
 calibrated chip timing. Logical ticks represent ordering only.
@@ -204,4 +236,5 @@ Implementation entry points:
 - [Programmable interfaces](../../../src/wse/runtime/persistent/decode.h)
 - [Executable and program replacement examples](decode_sim.cpp)
 - [Independent reference](reference.py) and [scenario runner](run_checks.py)
+- [External snapshot producer](prefill.py) and [C++ loader](../../../src/wse/runtime/persistent/prefill_state.cpp)
 - [Protocol tests](../../../tests/ut/cpp/wse/persistent/device_test.cpp)

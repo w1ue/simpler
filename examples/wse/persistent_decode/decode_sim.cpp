@@ -11,6 +11,7 @@
 #include "decode.h"
 
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -22,7 +23,9 @@ int main(int argc, char **argv) {
     try {
         DecodeConfig config;
         bool multi = false, custom = false, custom_batcher = false, invalid = false, invalid_service = false;
+        bool invalid_core = false;
         std::string output = "outputs/wse_decode";
+        std::filesystem::path prefill_directory;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--multi") multi = true;
@@ -32,12 +35,17 @@ int main(int argc, char **argv) {
             else if (argument == "--custom-batcher") custom_batcher = true;
             else if (argument == "--invalid-batcher") invalid = true;
             else if (argument == "--invalid-service") invalid_service = true;
+            else if (argument == "--invalid-core") invalid_core = true;
+            else if (argument == "--page-rows" && i + 1 < argc) config.page_rows = std::stoul(argv[++i]);
             else if (argument == "--max-context" && i + 1 < argc) config.max_context = std::stoul(argv[++i]);
             else if (argument == "--inbox-capacity" && i + 1 < argc) config.inbox_capacity = std::stoul(argv[++i]);
             else if (argument == "--cancel") config.cancel_long_request = true;
             else if (argument == "--output" && i + 1 < argc) output = argv[++i];
+            else if (argument == "--prefill-dir" && i + 1 < argc) prefill_directory = argv[++i];
             else throw std::invalid_argument("unknown or incomplete argument: " + argument);
         }
+        if (prefill_directory.empty())
+            throw std::invalid_argument("--prefill-dir is required; WSE executes decode only");
         DecodeSimulation simulation(config);
         if (custom_batcher) {
             simulation.register_batcher_operation(100, [](const auto &message, uint32_t) {
@@ -57,7 +65,10 @@ int main(int argc, char **argv) {
         if (custom) {
             auto program = wse::persistent::default_core_program();
             program.name = "decode_with_programmed_head_transform";
-            program.code.insert(program.code.begin() + 9, {InstructionKind::Invoke, 100, 0});
+            const auto sample = std::find_if(program.code.begin(), program.code.end(), [](const auto &instruction) {
+                return instruction.kind == InstructionKind::Invoke && instruction.operation == 19;
+            });
+            program.code.insert(sample, {InstructionKind::Invoke, 100, 0});
             simulation.register_core_operation(100, [](auto &values) {
                 for (size_t i = 0; i < values.size(); ++i)
                     values[i] += (static_cast<int>(i % 5) - 2) * 0.25;
@@ -74,11 +85,18 @@ int main(int argc, char **argv) {
             simulation.set_service_program(
                 {"invalid_send_before_compute", {{InstructionKind::Invoke, 31, 0}, {InstructionKind::Halt, 0, 0}}}
             );
-        simulation.add_request({"A", 0, 0, {1, 4, 7, 3, 2, 8, 5}, 4, "", 0});
+        if (invalid_core)
+            simulation.set_core_program(
+                {"invalid_decode_before_import", {{InstructionKind::Invoke, 11, 0}, {InstructionKind::Halt, 0, 0}}}
+            );
+        auto state = [&](const std::string &name) {
+            return wse::persistent::PrefillState::load(prefill_directory / (name + ".wsepf"), config);
+        };
+        simulation.add_request({"A", 0, 0, state("A"), 4, "", 0});
         if (multi) {
-            simulation.add_request({"B", 1, 1, {2, 6, 3, 9, 1, 5, 7, 4, 8, 2, 11, 3, 12}, 4, "", 0});
-            simulation.add_request({"C1", 2, 0, {3, 8, 2}, 2, "A", 2});
-            simulation.add_request({"C2", 0, 0, {7, 2, 1, 9, 5}, 2, "A", 0});
+            simulation.add_request({"B", 1, 1, state("B"), 4, "", 0});
+            simulation.add_request({"C1", 2, 0, state("C1"), 2, "A", 2});
+            simulation.add_request({"C2", 0, 0, state("C2"), 2, "A", 0});
         }
         simulation.run();
         simulation.write_report(output);

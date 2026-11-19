@@ -24,7 +24,7 @@
 namespace wse::persistent {
 namespace {
 constexpr uint32_t kExpert = 1, kResult = 2, kLookup = 3, kLookupResult = 4, kShared = 5;
-constexpr uint32_t kFetch = 6, kStore = 7;
+constexpr uint32_t kFetch = 6, kStore = 7, kImport = 8;
 constexpr std::array<uint32_t, 4> kSources{2, 8, 14, 20};
 constexpr std::array<double, 8> kFp4{0, 0.5, 1, 1.5, 2, 3, 4, 6};
 
@@ -200,9 +200,9 @@ Values unpack_fp4(const Bytes &bytes, uint32_t dimensions) {
 }
 
 Program default_core_program() {
-    Program program{"decode_40_layer", {}};
+    Program program{"decode_40_layer", {{InstructionKind::Invoke, 20, 0}}};
     for (uint32_t op = 10; op <= 19; ++op)
-        program.code.push_back({InstructionKind::Invoke, op, op == 18 ? 1u : 0u});
+        program.code.push_back({InstructionKind::Invoke, op, op == 18 ? 2u : 0u});
     program.code.push_back({InstructionKind::Halt, 0, 0});
     return program;
 }
@@ -216,8 +216,15 @@ struct DecodeSimulation::Request {
     RequestSpec spec;
     uint64_t generation;
     uint32_t home_core;
-    uint32_t position = 0, layer = 0, prompt_index = 0, input = 0;
-    bool prefill = true, handoff_pending = false, finishing = false, retired = false, cancelled = false;
+    uint32_t position = 0, layer = 0, input = 0;
+    bool imported = false, finishing = false, retired = false, cancelled = false;
+    struct ImportChunk {
+        Handle source, destination;
+        bool consumed = false;
+        uint32_t rows = 0;
+    };
+    std::vector<ImportChunk> imports;
+    uint32_t import_next = 0, import_done = 0;
     Continuation continuation;
     Handle frame = 0;
     std::vector<Handle> windows;
@@ -276,6 +283,8 @@ DecodeSimulation::DecodeSimulation(DecodeConfig config) :
         sram_.push_back(memory_.add_region(Tier::Sram, core, 16 * 1024 * 1024));
     for (uint32_t chip = 0; chip < config.chips; ++chip)
         bailu_.push_back(memory_.add_region(Tier::Bailu, home(chip), 64 * 1024 * 1024));
+    for (uint32_t chip = 0; chip < config.chips; ++chip)
+        host_.push_back(memory_.add_region(Tier::Host, home(chip), 128 * 1024 * 1024));
     for (uint32_t endpoint = 0; endpoint < fabric_.endpoint_count(); ++endpoint) {
         batcher_regions_.push_back(memory_.add_region(Tier::Batcher, endpoint, 64 * 1024));
         memory_.allocate(batcher_regions_.back(), 32 * 256);
@@ -371,14 +380,107 @@ void DecodeSimulation::register_core_operation(uint32_t id, std::function<void(V
         throw std::invalid_argument("invalid custom AICore operation");
 }
 void DecodeSimulation::add_request(RequestSpec request) {
-    if (running_ || request.name.empty() || request.prompt.empty() || !request.decode_inputs ||
-        request.home_chip >= config_.chips || request.prompt.size() + request.decode_inputs > config_.max_context)
+    if (running_ || request.name.empty() || !request.decode_inputs || request.home_chip >= config_.chips ||
+        request.prefill.tokens.size() + request.decode_inputs > config_.max_context)
         throw std::invalid_argument("invalid request or maximum context exceeded");
-    for (const auto token : request.prompt)
-        if (token >= config_.vocabulary) throw std::invalid_argument("token outside vocabulary");
+    request.prefill.validate(config_);
     for (const auto &existing : specifications_)
         if (existing.name == request.name) throw std::invalid_argument("duplicate request name");
+    auto images = prepare_import(request);
     specifications_.push_back(std::move(request));
+    import_images_.push_back(std::move(images));
+}
+std::vector<DecodeSimulation::ImportImage> DecodeSimulation::prepare_import(const RequestSpec &spec) {
+    std::vector<ImportImage> images;
+    const auto &state = spec.prefill;
+    auto add = [&](uint32_t type, uint32_t family, uint32_t index, uint32_t valid, const Bytes &bytes) {
+        auto source = memory_.allocate(host_[spec.home_chip], bytes.size());
+        images.push_back({source, type, family, index, valid});
+        memory_.load_before_launch(source, bytes);
+    };
+    try {
+        for (uint32_t family = 0; family < 4; ++family) {
+            for (uint32_t first = 0; first < state.kv_rows[family].size(); first += config_.page_rows) {
+                const auto valid = std::min<size_t>(config_.page_rows, state.kv_rows[family].size() - first);
+                Bytes kv(config_.page_rows * packed_size(config_.latent));
+                Bytes keys(config_.page_rows * packed_size(config_.index_dim));
+                for (uint32_t row = 0; row < valid; ++row) {
+                    const auto &value = state.kv_rows[family][first + row];
+                    const auto &key = state.key_rows[family][first + row];
+                    std::copy(value.begin(), value.end(), kv.begin() + row * value.size());
+                    std::copy(key.begin(), key.end(), keys.begin() + row * key.size());
+                }
+                add(0, family, first / config_.page_rows, valid, kv);
+                add(1, family, first / config_.page_rows, valid, keys);
+            }
+        }
+        for (uint32_t layer = 0; layer < config_.layers; ++layer) {
+            Values ring(config_.window * config_.latent);
+            const auto rows = state.windows[layer].size() / config_.latent;
+            for (size_t row = 0; row < rows; ++row) {
+                const auto position = state.tokens.size() - rows + row;
+                std::copy_n(
+                    state.windows[layer].begin() + row * config_.latent, config_.latent,
+                    ring.begin() + (position % config_.window) * config_.latent
+                );
+            }
+            add(2, layer, 0, 0, encode_values(ring));
+        }
+        for (uint32_t family = 0; family < 3; ++family)
+            add(3, family, 0, 0, encode_values(state.compressor_states[family]));
+    } catch (...) {
+        for (const auto &image : images)
+            memory_.release(image.source);
+        throw;
+    }
+    return images;
+}
+void DecodeSimulation::bind_import(Request &request, size_t specification_index) {
+    const auto &state = request.spec.prefill;
+    request.position = state.tokens.size();
+    request.tokens = state.tokens;
+    request.input = request.prefill_next_token = state.next_token;
+    for (uint32_t family = 0; family < 4; ++family)
+        request.rows[family] = state.kv_rows[family].size();
+    for (const auto &image : import_images_.at(specification_index)) {
+        Handle destination = 0;
+        if (image.type == 0) {
+            Page page;
+            page.valid = image.valid;
+            page.keys = memory_.allocate(sram_[request.home_core], config_.page_rows * packed_size(config_.index_dim));
+            if (image.valid == config_.page_rows) {
+                page.external = memory_.allocate(bailu_[request.spec.home_chip], memory_.size(image.source));
+                destination = page.external;
+                page.flush_sent = page.flush_done = true;
+            } else {
+                page.tail = memory_.allocate(sram_[request.home_core], memory_.size(image.source));
+                destination = page.tail;
+            }
+            request.pages[image.family].push_back(page);
+        } else if (image.type == 1) destination = request.pages[image.family].at(image.index).keys;
+        else if (image.type == 2) destination = request.windows.at(image.family);
+        else destination = request.compressor_states.at(image.family);
+        request.imports.push_back({image.source, destination, false, image.type == 0 ? image.valid : 0});
+    }
+}
+StepResult DecodeSimulation::import_prefill(Request &request) {
+    if (request.imported) throw std::runtime_error("duplicate prefill import instruction");
+    if (request.import_next < request.imports.size()) {
+        const auto lane = request.import_next;
+        const auto &chunk = request.imports[lane];
+        if (!fabric_.send(
+                {request.identity(kImport, lane), request.home_core, request.home_core, 0, kImport, chunk.source,
+                 chunk.destination}
+            ))
+            return StepResult::Waiting;
+        import_bytes_ += memory_.size(chunk.source);
+        ++request.import_next;
+        return StepResult::Waiting;
+    }
+    if (request.import_done != request.imports.size()) return StepResult::Waiting;
+    request.imported = true;
+    fabric_.record("PREFILL_IMPORTED", request.home_core, request.identity());
+    return StepResult::Progress;
 }
 bool DecodeSimulation::admit_requests() {
     bool progress = false;
@@ -402,7 +504,6 @@ bool DecodeSimulation::admit_requests() {
         request->home_core = home(spec.home_chip);
         request->generation = ++generations_[spec.slot];
         if (request->generation > 1) ++request_reuses_;
-        request->input = spec.prompt.front();
         request->streams.resize(4 * config_.hidden);
         request->frame = memory_.allocate(sram_[request->home_core], 4096 + 256 * config_.hidden);
         for (uint32_t layer = 0; layer < config_.layers; ++layer)
@@ -413,6 +514,7 @@ bool DecodeSimulation::admit_requests() {
             state = memory_.allocate(sram_[request->home_core], 8 * 2 * config_.latent * 8);
         request->results.resize(7);
         request->lookup_results.resize(config_.chips);
+        bind_import(*request, i);
         fabric_.record("ADMIT", request->home_core, request->identity());
         requests_.push_back(std::move(request));
         progress = true;
@@ -426,6 +528,7 @@ DecodeSimulation::Request &DecodeSimulation::find_request(const Identity &key) {
     throw std::runtime_error("message has stale request generation");
 }
 void DecodeSimulation::embed(Request &request) {
+    if (!request.imported) throw std::runtime_error("decode before prefill import completed");
     if (request.position >= config_.max_context) throw std::runtime_error("maximum context write rejected");
     const auto &embedding = embedding_[request.spec.home_chip];
     const auto values = decode_values(memory_.read_local(request.home_core, embedding.handle));
@@ -436,7 +539,7 @@ void DecodeSimulation::embed(Request &request) {
     request.layer = 0;
     request.lookup_next = request.lookup_bitmap = 0;
     request.lookup_applied = false;
-    fabric_.record(request.prefill ? "PREFILL_INPUT" : "DECODE_INPUT", request.home_core, request.identity());
+    fabric_.record("DECODE_INPUT", request.home_core, request.identity());
 }
 void DecodeSimulation::prepare_attention(Request &request) {
     const auto core = request.home_core;
@@ -696,6 +799,18 @@ bool DecodeSimulation::receive(uint32_t core) {
         return true;
     }
     if (core != request.home_core) throw std::runtime_error("response arrived at incorrect request home");
+    if (message.kind == kImport) {
+        auto &chunk = request.imports.at(message.key.lane);
+        if (request.imported || chunk.consumed || message.destination != chunk.destination ||
+            message.source != chunk.source || message.key.position != request.position || message.key.layer != 0)
+            throw std::runtime_error("invalid prefill import completion");
+        chunk.consumed = true;
+        ++request.import_done;
+        imported_rows_ += chunk.rows;
+        memory_.release(message.source);
+        fabric_.record("PREFILL_CHUNK_READY", core, message.key);
+        return true;
+    }
     if (message.kind == kStore) {
         auto &page = request.pages.at(message.expert).at(message.key.lane);
         if (!page.flush_sent || page.flush_done || message.destination != page.external)
@@ -857,27 +972,16 @@ void DecodeSimulation::sample(Request &request) {
     auto logits = multiply(request.home_core, normalize(std::move(head)), lm_head_[request.spec.home_chip]);
     const auto token = static_cast<uint32_t>(std::max_element(logits.begin(), logits.end()) - logits.begin());
     ++request.position;
-    if (request.prefill) {
-        ++request.prompt_index;
-        if (request.prompt_index < request.spec.prompt.size())
-            request.input = request.spec.prompt[request.prompt_index];
-        else {
-            request.prefill_next_token = token;
-            request.input = token;
-            request.handoff_pending = true;
-        }
-    } else {
-        request.generated.push_back(token);
-        request.logits.push_back(std::move(logits));
-        fabric_.record("OUTPUT_TOKEN", request.home_core, request.identity());
-        request.input = token;
-        if (config_.cancel_long_request && request.spec.name == "B" && request.generated.size() == 2) {
-            request.cancelled = true;
-            fabric_.record("CANCEL", request.home_core, request.identity());
-        }
-        request.finishing = request.cancelled || request.generated.size() == request.spec.decode_inputs;
+    request.generated.push_back(token);
+    request.logits.push_back(std::move(logits));
+    fabric_.record("OUTPUT_TOKEN", request.home_core, request.identity());
+    request.input = token;
+    if (config_.cancel_long_request && request.spec.name == "B" && request.generated.size() == 2) {
+        request.cancelled = true;
+        fabric_.record("CANCEL", request.home_core, request.identity());
     }
-    if (!request.finishing) request.continuation.redirect(0);
+    request.finishing = request.cancelled || request.generated.size() == request.spec.decode_inputs;
+    if (!request.finishing) request.continuation.redirect(1);
 }
 bool DecodeSimulation::step_request(Request &request) {
     if (request.retired) return false;
@@ -895,14 +999,15 @@ bool DecodeSimulation::step_request(Request &request) {
         }
         return progress;
     }
-    if (request.handoff_pending) {
-        if (fabric_.outstanding(request.spec.slot, request.generation)) return progress;
-        request.prefill = false;
-        request.handoff_pending = false;
-        fabric_.record("PREFILL_READY", request.home_core, request.identity());
-        return true;
+    if (!request.imported && request.continuation.pc < core_program_.code.size()) {
+        const auto &instruction = core_program_.code[request.continuation.pc];
+        if (instruction.kind == InstructionKind::Invoke && instruction.operation != 20)
+            throw std::runtime_error("decode before prefill import completed");
     }
     OperationRegistry operations;
+    operations.add(20, [&](uint32_t) {
+        return import_prefill(request);
+    });
     operations.add(10, [&](uint32_t) {
         embed(request);
         return StepResult::Progress;
@@ -1062,10 +1167,13 @@ void DecodeSimulation::write_report(const std::filesystem::path &output) const {
     report << std::setprecision(17);
     report << "{\"executor\":\"wse_persistent_logical\",\"payload\":\"dense_numeric\","
               "\"model\":\"scaled_structural_fixture\",\"arithmetic\":\"fp64_fixture_fp4_history\","
-              "\"time\":\"untimed_logical_ticks\",\"prefill\":\"causal_streaming_on_device\","
+              "\"time\":\"untimed_logical_ticks\",\"prefill\":\"external_snapshot_import\","
+              "\"wse_prefill_compute_positions\":0,"
               "\"full_checkpoint_validated\":false,\"launches\":"
            << launch_count_ << ",\"ticks\":" << fabric_.tick() << ",\"core_steps\":" << core_steps_
-           << ",\"bytes_transferred\":" << fabric_.bytes_transferred()
+           << ",\"bytes_transferred\":" << fabric_.bytes_transferred() << ",\"prefill_import_bytes\":" << import_bytes_
+           << ",\"decode_bytes_transferred\":" << fabric_.bytes_transferred() - import_bytes_
+           << ",\"prefill_kv_rows_imported\":" << imported_rows_
            << ",\"custom_batcher_steps\":" << fabric_.custom_program_steps()
            << ",\"credit_stalls\":" << fabric_.credit_stalls() << ",\"bailu_fetches\":" << history_fetches_
            << ",\"kv_rows_committed\":" << kv_rows_ << ",\"slot_reuses\":" << request_reuses_ << ",\"all_drained\":"
@@ -1082,7 +1190,7 @@ void DecodeSimulation::write_report(const std::filesystem::path &output) const {
         report << "{\"name\":" << json_string(request.spec.name) << ",\"slot\":" << request.spec.slot
                << ",\"generation\":" << request.generation << ",\"home_chip\":" << request.spec.home_chip
                << ",\"prompt\":";
-        json_integers(report, request.spec.prompt);
+        json_integers(report, request.spec.prefill.tokens);
         report << ",\"processed_length\":" << request.position
                << ",\"prefill_next_token\":" << request.prefill_next_token
                << ",\"cancelled\":" << (request.cancelled ? "true" : "false") << ",\"generated\":";

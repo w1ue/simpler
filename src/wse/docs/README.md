@@ -134,7 +134,9 @@ The source-tree [programmable persistent decode simulator](../../../examples/wse
 is a separate C++ logical execution component under `runtime/persistent` and
 `platform/sim/persistent`. It adds bounded batcher transport, owner-checked
 SRAM/Bailu storage and a scaled 40-layer numerical fixture. Its standalone
-CMake/CTest entry does not run through the ordinary Worker/HBG backend described
+executable imports external prefill state through the batcher and computes only
+decode inputs; see its snapshot contract for placement and validation details.
+Its CMake/CTest entry does not run through the ordinary Worker/HBG backend described
 above. Its ticks express event order, not hardware time.
 
 This is CPU functional simulation, not instruction timing, physical register

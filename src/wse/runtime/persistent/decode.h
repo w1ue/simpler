@@ -11,6 +11,7 @@
 #pragma once
 
 #include "device.h"
+#include "prefill_state.h"
 
 #include <array>
 #include <filesystem>
@@ -46,7 +47,7 @@ struct RequestSpec {
     std::string name;
     uint32_t slot;
     uint32_t home_chip;
-    std::vector<uint32_t> prompt;
+    PrefillState prefill;
     uint32_t decode_inputs;
     std::string admit_after;
     uint32_t admit_after_outputs = 0;
@@ -66,6 +67,7 @@ struct LayerWeights {
 };
 
 enum class DecodeOperation : uint32_t {
+    ImportPrefill = 20,
     Embed = 10,
     AttentionPrepare = 11,
     Index = 12,
@@ -98,11 +100,17 @@ private:
     struct Page;
     struct Request;
     struct ExpertWork;
+    struct ImportImage {
+        Handle source;
+        uint32_t type, family, index, valid;
+    };
     DecodeConfig config_;
     Memory memory_;
     Fabric fabric_;
     std::vector<uint32_t> sram_;
     std::vector<uint32_t> bailu_;
+    std::vector<uint32_t> host_;
+    std::vector<std::vector<ImportImage>> import_images_;
     std::vector<uint32_t> batcher_regions_;
     std::vector<std::vector<LayerWeights>> weights_;
     std::vector<Matrix> embedding_;
@@ -121,6 +129,7 @@ private:
     uint64_t history_fetches_ = 0;
     uint64_t kv_rows_ = 0;
     uint64_t request_reuses_ = 0;
+    uint64_t imported_rows_ = 0, import_bytes_ = 0;
 
     Matrix make_weight(uint32_t owner, uint32_t rows, uint32_t cols, uint32_t seed);
     Values multiply(uint32_t core, const Values &x, const Matrix &matrix) const;
@@ -128,6 +137,9 @@ private:
     uint32_t expert_owner(uint32_t expert) const;
     void deploy_weights();
     bool admit_requests();
+    std::vector<ImportImage> prepare_import(const RequestSpec &spec);
+    void bind_import(Request &request, size_t specification_index);
+    StepResult import_prefill(Request &request);
     bool receive(uint32_t core);
     bool step_expert(uint32_t core);
     bool step_request(Request &request);

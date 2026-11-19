@@ -53,6 +53,15 @@ int main() {
             "capacity overrun accepted"
         );
         const auto cold = memory.allocate(external, 8);
+        const auto host_region = memory.add_region(Tier::Host, 0, 512);
+        const auto host_payload = memory.allocate(host_region, 8);
+        memory.load_before_launch(host_payload, encode_values({4.0}));
+        rejects(
+            [&] {
+                memory.read_local(0, host_payload);
+            },
+            "direct Host state compute accepted"
+        );
         rejects(
             [&] {
                 memory.read_local(0, cold);

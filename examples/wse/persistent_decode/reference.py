@@ -219,10 +219,12 @@ def verify(directory):
     errors = dict(logits=0.0, layer_checksums=0.0, cache_rows=0.0, key_rows=0.0, windows=0.0, compressor_states=0.0)
     tokens_checked = 0
     for request in result["requests"]:
-        reference = Reference(result["config"], custom_head=custom)
+        reference = Reference(result["config"])
         for token in request["prompt"]:
             next_token, _ = reference.feed(token)
         assert next_token == request["prefill_next_token"], (request["name"], "prefill token mismatch")
+        reference.custom_head = custom
+        reference.checksums.clear()
         for token, logits in zip(request["generated"], request["logits"]):
             next_token, golden_logits = reference.feed(next_token)
             assert next_token == token, (request["name"], "decode token mismatch")

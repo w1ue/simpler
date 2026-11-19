@@ -26,7 +26,7 @@ using Bytes = std::vector<uint8_t>;
 using Values = std::vector<double>;
 using Handle = uint64_t;
 
-enum class Tier { Sram, Bailu, Batcher };
+enum class Tier { Sram, Bailu, Batcher, Host };
 struct Region {
     Tier tier;
     uint32_t owner;
