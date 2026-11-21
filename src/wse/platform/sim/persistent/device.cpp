@@ -17,6 +17,7 @@
 namespace wse::persistent {
 
 uint32_t Memory::add_region(Tier tier, uint32_t owner, uint64_t capacity) {
+    if (!grants_.empty()) throw std::runtime_error("cannot change regions with live reservations");
     regions_.push_back({tier, owner, capacity});
     return regions_.size() - 1;
 }
@@ -33,17 +34,55 @@ const Memory::Allocation &Memory::get(Handle handle) const {
         throw std::runtime_error("stale or unallocated memory handle " + std::to_string(handle));
     return found->second;
 }
-Handle Memory::allocate(uint32_t region, size_t bytes) {
+Reservation Memory::try_reserve(const std::vector<uint64_t> &bytes) {
+    if (bytes.size() != regions_.size()) throw std::invalid_argument("reservation region count mismatch");
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        const auto &region = regions_[i];
+        if (bytes[i] % wse::SRAM_ALIGNMENT) throw std::invalid_argument("unaligned reservation");
+        if (bytes[i] > region.capacity - region.used - region.reserved) return 0;
+    }
+    const auto id = next_grant_++;
+    grants_.emplace(id, Grant{bytes, std::vector<uint64_t>(bytes.size())});
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        auto &region = regions_[i];
+        region.reserved += bytes[i];
+        region.committed_peak = std::max(region.committed_peak, region.used + region.reserved);
+    }
+    return id;
+}
+void Memory::release_reservation(Reservation reservation) {
+    const auto &grant = grants_.at(reservation);
+    if (std::any_of(grant.used.begin(), grant.used.end(), [](auto used) {
+            return used != 0;
+        }))
+        throw std::runtime_error("reservation still owns allocations");
+    for (size_t i = 0; i < regions_.size(); ++i)
+        regions_[i].reserved -= grant.limits[i];
+    grants_.erase(reservation);
+}
+Handle Memory::allocate(uint32_t region, size_t bytes, Reservation reservation) {
     auto &target = regions_.at(region);
     if (!bytes || bytes > UINT64_MAX - wse::SRAM_ALIGNMENT) throw std::runtime_error("invalid allocation size");
     const auto charged = (bytes + wse::SRAM_ALIGNMENT - 1) / wse::SRAM_ALIGNMENT * wse::SRAM_ALIGNMENT;
-    if (charged > target.capacity - target.used) throw std::runtime_error("device region capacity exhausted");
+    if (reservation) {
+        const auto &grant = grants_.at(reservation);
+        if (charged > grant.limits.at(region) - grant.used.at(region))
+            throw std::runtime_error("request allocation exceeds reserved capacity");
+    } else if (charged > target.capacity - target.used - target.reserved) {
+        throw std::runtime_error("device region capacity exhausted");
+    }
     const auto handle = next_++;
     Allocation allocation{region, Bytes(bytes)};
     allocation.charged = charged;
+    allocation.reservation = reservation;
     allocations_.emplace(handle, std::move(allocation));
+    if (reservation) {
+        grants_.at(reservation).used[region] += charged;
+        target.reserved -= charged;
+    }
     target.used += charged;
     target.peak = std::max(target.peak, target.used);
+    target.committed_peak = std::max(target.committed_peak, target.used + target.reserved);
     return handle;
 }
 void Memory::release(Handle handle) {
@@ -51,6 +90,10 @@ void Memory::release(Handle handle) {
     if (allocation.readers || allocation.writers || allocation.deliveries)
         throw std::runtime_error("reclaim before transfer consumed");
     regions_.at(allocation.region).used -= allocation.charged;
+    if (allocation.reservation) {
+        grants_.at(allocation.reservation).used[allocation.region] -= allocation.charged;
+        regions_.at(allocation.region).reserved += allocation.charged;
+    }
     allocations_.erase(handle);
 }
 void Memory::write_local(uint32_t core, Handle handle, const Bytes &bytes) {
@@ -68,6 +111,13 @@ const Bytes &Memory::read_local(uint32_t core, Handle handle) const {
     if (region.tier != Tier::Sram || region.owner != core) throw std::runtime_error("nonlocal SRAM read");
     if (allocation.writers || !allocation.visible) throw std::runtime_error("read before transfer publication");
     return allocation.bytes;
+}
+void Memory::stage_host(Handle handle, const Bytes &bytes) {
+    auto &allocation = get(handle);
+    if (regions_.at(allocation.region).tier != Tier::Host || allocation.readers || allocation.writers ||
+        allocation.deliveries || allocation.bytes.size() != bytes.size())
+        throw std::runtime_error("invalid Host staging write");
+    allocation.bytes = bytes;
 }
 void Memory::load_before_launch(Handle handle, const Bytes &bytes) {
     auto &allocation = get(handle);

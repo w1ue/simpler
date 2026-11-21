@@ -9,6 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 #include "decode.h"
+#include "live_input.h"
 
 #include <iostream>
 #include <algorithm>
@@ -22,13 +23,15 @@ using wse::persistent::InstructionKind;
 int main(int argc, char **argv) {
     try {
         DecodeConfig config;
-        bool multi = false, custom = false, custom_batcher = false, invalid = false, invalid_service = false;
+        bool multi = false, custom = false, custom_batcher = false, invalid = false, invalid_service = false,
+             live = false;
         bool invalid_core = false;
         std::string output = "outputs/wse_decode";
         std::filesystem::path prefill_directory;
         for (int i = 1; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--multi") multi = true;
+            else if (argument == "--serve") live = true;
             else if (argument == "--single") multi = false;
             else if (argument == "--reverse-batcher") config.reverse_batcher = true;
             else if (argument == "--custom-core") custom = true;
@@ -39,12 +42,17 @@ int main(int argc, char **argv) {
             else if (argument == "--page-rows" && i + 1 < argc) config.page_rows = std::stoul(argv[++i]);
             else if (argument == "--max-context" && i + 1 < argc) config.max_context = std::stoul(argv[++i]);
             else if (argument == "--inbox-capacity" && i + 1 < argc) config.inbox_capacity = std::stoul(argv[++i]);
+            else if (argument == "--max-slots" && i + 1 < argc) config.max_slots = std::stoul(argv[++i]);
+            else if (argument == "--max-pending" && i + 1 < argc) config.max_pending = std::stoul(argv[++i]);
+            else if (argument == "--sram-bytes" && i + 1 < argc) config.sram_bytes = std::stoull(argv[++i]);
+            else if (argument == "--bailu-bytes" && i + 1 < argc) config.bailu_bytes = std::stoull(argv[++i]);
+            else if (argument == "--host-bytes" && i + 1 < argc) config.host_bytes = std::stoull(argv[++i]);
             else if (argument == "--cancel") config.cancel_long_request = true;
             else if (argument == "--output" && i + 1 < argc) output = argv[++i];
             else if (argument == "--prefill-dir" && i + 1 < argc) prefill_directory = argv[++i];
             else throw std::invalid_argument("unknown or incomplete argument: " + argument);
         }
-        if (prefill_directory.empty())
+        if (!live && prefill_directory.empty())
             throw std::invalid_argument("--prefill-dir is required; WSE executes decode only");
         DecodeSimulation simulation(config);
         if (custom_batcher) {
@@ -92,15 +100,19 @@ int main(int argc, char **argv) {
         auto state = [&](const std::string &name) {
             return wse::persistent::PrefillState::load(prefill_directory / (name + ".wsepf"), config);
         };
-        simulation.add_request({"A", 0, 0, state("A"), 4, "", 0});
-        if (multi) {
-            simulation.add_request({"B", 1, 1, state("B"), 4, "", 0});
-            simulation.add_request({"C1", 2, 0, state("C1"), 2, "A", 2});
-            simulation.add_request({"C2", 0, 0, state("C2"), 2, "A", 0});
+        if (live) {
+            serve_input(simulation, config);
+        } else {
+            simulation.add_request({"A", 0, 0, state("A"), 4, "", 0});
+            if (multi) {
+                simulation.add_request({"B", 1, 1, state("B"), 4, "", 0});
+                simulation.add_request({"C1", 2, 0, state("C1"), 2, "A", 2});
+                simulation.add_request({"C2", 0, 0, state("C2"), 2, "A", 0});
+            }
+            simulation.run();
         }
-        simulation.run();
         simulation.write_report(output);
-        std::cout << "Completed " << simulation.completed_requests() << " requests; report: " << output << '\n';
+        std::cerr << "Completed " << simulation.completed_requests() << " requests; report: " << output << '\n';
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "WSE decode simulation failed: " << error.what() << '\n';

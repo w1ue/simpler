@@ -32,15 +32,21 @@ repackages rows into its configured page size and assigns the generation on
 admission. Page size and maximum context are receiver policy; N plus requested
 decode input count must fit its maximum context.
 
-All numerical payload buffers are staged in owner-associated simulated Host
-regions before the logical service launch. A later-admitted request retains its
-Host payload until admission. Operation 20 issues bounded batcher jobs, waits
+Snapshots can be submitted before launch or while the service is running.
+After the receiver grants the request's resource budget, numerical payload
+buffers are staged in owner-associated simulated Host regions. Waiting requests
+retain their snapshot as Host-side C++ state without allocating device-region
+payload buffers. Operation 20 issues bounded batcher jobs, waits
 for every completion, and then records `PREFILL_IMPORTED`. Every chunk obeys
 credit -> DMA -> delivery -> publication -> consume. Decode embedding rejects
 execution before that completion point. Import buffers are reclaimed after
 consumption; full imported KV pages remain read-only in Bailu, and the imported
 partial tail can accept new decode rows. Request retirement drains and reclaims
 both imported and newly generated storage.
+
+The [serving contract](serving.md) defines bounded input, context promises,
+resource reservation and the stdin producer interface. The snapshot format is
+independent of slot assignment and receiver storage capacity.
 
 ## Binary format
 
@@ -77,7 +83,8 @@ magnitude code from `[0, 0.5, 1, 1.5, 2, 3, 4, 6]`; its four-element group uses
 scale `2^exponent`. Thus each row consumes D bytes in this fixture format.
 Dense windows and C2A state use IEEE float64. Missing or trailing fields,
 incompatible contracts, invalid counts/tokens, nonfinite state and damaged
-envelopes are errors. Failed loading occurs before service launch.
+envelopes are errors. Failed loading occurs before admission; the live adapter
+rejects the submission and continues serving other requests.
 
 ## Generate and consume
 

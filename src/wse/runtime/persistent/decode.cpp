@@ -214,6 +214,7 @@ struct DecodeSimulation::Page {
 };
 struct DecodeSimulation::Request {
     RequestSpec spec;
+    Reservation reservation = 0;
     uint64_t generation;
     uint32_t home_core;
     uint32_t position = 0, layer = 0, input = 0;
@@ -277,19 +278,21 @@ DecodeSimulation::DecodeSimulation(DecodeConfig config) :
     if (config.layers != 40 || config.chips != 2 || config.cores_per_chip != 8 || config.experts != 8 ||
         config.top_k != 6 || config.hidden < 4 || !config.latent || config.latent % 4 || !config.index_dim ||
         config.index_dim % 4 || !config.heads || !config.intermediate || !config.index_top_k || !config.page_rows ||
-        config.vocabulary < 2 || !config.window || config.max_context < 1)
+        config.vocabulary < 2 || !config.window || config.max_context < 1 || !config.max_slots || !config.max_pending)
         throw std::invalid_argument("unsupported scaled fixture contract");
     for (uint32_t core = 0; core < config.chips * config.cores_per_chip; ++core)
-        sram_.push_back(memory_.add_region(Tier::Sram, core, 16 * 1024 * 1024));
+        sram_.push_back(memory_.add_region(Tier::Sram, core, config.sram_bytes));
     for (uint32_t chip = 0; chip < config.chips; ++chip)
-        bailu_.push_back(memory_.add_region(Tier::Bailu, home(chip), 64 * 1024 * 1024));
+        bailu_.push_back(memory_.add_region(Tier::Bailu, home(chip), config.bailu_bytes));
     for (uint32_t chip = 0; chip < config.chips; ++chip)
-        host_.push_back(memory_.add_region(Tier::Host, home(chip), 128 * 1024 * 1024));
+        host_.push_back(memory_.add_region(Tier::Host, home(chip), config.host_bytes));
     for (uint32_t endpoint = 0; endpoint < fabric_.endpoint_count(); ++endpoint) {
         batcher_regions_.push_back(memory_.add_region(Tier::Batcher, endpoint, 64 * 1024));
         memory_.allocate(batcher_regions_.back(), 32 * 256);
     }
     deploy_weights();
+    for (const auto &region : memory_.regions())
+        baseline_used_.push_back(region.used);
 }
 DecodeSimulation::~DecodeSimulation() = default;
 uint32_t DecodeSimulation::home(uint32_t chip) const { return chip * config_.cores_per_chip; }
@@ -379,24 +382,14 @@ void DecodeSimulation::register_core_operation(uint32_t id, std::function<void(V
     if (running_ || id < 100 || !operation || !custom_core_operations_.emplace(id, std::move(operation)).second)
         throw std::invalid_argument("invalid custom AICore operation");
 }
-void DecodeSimulation::add_request(RequestSpec request) {
-    if (running_ || request.name.empty() || !request.decode_inputs || request.home_chip >= config_.chips ||
-        request.prefill.tokens.size() + request.decode_inputs > config_.max_context)
-        throw std::invalid_argument("invalid request or maximum context exceeded");
-    request.prefill.validate(config_);
-    for (const auto &existing : specifications_)
-        if (existing.name == request.name) throw std::invalid_argument("duplicate request name");
-    auto images = prepare_import(request);
-    specifications_.push_back(std::move(request));
-    import_images_.push_back(std::move(images));
-}
-std::vector<DecodeSimulation::ImportImage> DecodeSimulation::prepare_import(const RequestSpec &spec) {
+std::vector<DecodeSimulation::ImportImage>
+DecodeSimulation::prepare_import(const RequestSpec &spec, Reservation reservation) {
     std::vector<ImportImage> images;
     const auto &state = spec.prefill;
     auto add = [&](uint32_t type, uint32_t family, uint32_t index, uint32_t valid, const Bytes &bytes) {
-        auto source = memory_.allocate(host_[spec.home_chip], bytes.size());
+        auto source = memory_.allocate(host_[spec.home_chip], bytes.size(), reservation);
         images.push_back({source, type, family, index, valid});
-        memory_.load_before_launch(source, bytes);
+        memory_.stage_host(source, bytes);
     };
     try {
         for (uint32_t family = 0; family < 4; ++family) {
@@ -435,25 +428,28 @@ std::vector<DecodeSimulation::ImportImage> DecodeSimulation::prepare_import(cons
     }
     return images;
 }
-void DecodeSimulation::bind_import(Request &request, size_t specification_index) {
+void DecodeSimulation::bind_import(Request &request, const std::vector<ImportImage> &images) {
     const auto &state = request.spec.prefill;
     request.position = state.tokens.size();
     request.tokens = state.tokens;
     request.input = request.prefill_next_token = state.next_token;
     for (uint32_t family = 0; family < 4; ++family)
         request.rows[family] = state.kv_rows[family].size();
-    for (const auto &image : import_images_.at(specification_index)) {
+    for (const auto &image : images) {
         Handle destination = 0;
         if (image.type == 0) {
             Page page;
             page.valid = image.valid;
-            page.keys = memory_.allocate(sram_[request.home_core], config_.page_rows * packed_size(config_.index_dim));
+            page.keys = memory_.allocate(
+                sram_[request.home_core], config_.page_rows * packed_size(config_.index_dim), request.reservation
+            );
             if (image.valid == config_.page_rows) {
-                page.external = memory_.allocate(bailu_[request.spec.home_chip], memory_.size(image.source));
+                page.external =
+                    memory_.allocate(bailu_[request.spec.home_chip], memory_.size(image.source), request.reservation);
                 destination = page.external;
                 page.flush_sent = page.flush_done = true;
             } else {
-                page.tail = memory_.allocate(sram_[request.home_core], memory_.size(image.source));
+                page.tail = memory_.allocate(sram_[request.home_core], memory_.size(image.source), request.reservation);
                 destination = page.tail;
             }
             request.pages[image.family].push_back(page);
@@ -491,30 +487,59 @@ bool DecodeSimulation::admit_requests() {
             }))
             continue;
         bool gate = spec.admit_after.empty();
-        bool slot_busy = false;
+        uint32_t slot = spec.slot;
+        const auto busy = [&](uint32_t candidate) {
+            return std::any_of(requests_.begin(), requests_.end(), [&](const auto &previous) {
+                return !previous->retired && previous->spec.slot == candidate;
+            });
+        };
+        if (slot == automatic_slot) {
+            slot = 0;
+            while (slot < config_.max_slots && busy(slot))
+                ++slot;
+        }
         for (const auto &previous : requests_) {
             if (previous->spec.name == spec.admit_after)
                 gate = spec.admit_after_outputs ? previous->generated.size() >= spec.admit_after_outputs :
                                                   previous->retired;
-            if (!previous->retired && previous->spec.slot == spec.slot) slot_busy = true;
         }
-        if (!gate || slot_busy) continue;
+        if (!gate) continue;
+        const auto wait = [&](const std::string &reason) {
+            if (admission_waiting_[spec.name] != reason) {
+                admission_waiting_[spec.name] = reason;
+                ++admission_waits_;
+                fabric_.record(reason, home(spec.home_chip), {slot, 0, uint32_t(spec.prefill.tokens.size()), 0, 0, 0});
+            }
+        };
+        if (slot >= config_.max_slots || busy(slot)) {
+            wait("WAIT_SLOT");
+            continue;
+        }
+        const auto reservation = memory_.try_reserve(request_budget(spec));
+        if (!reservation) {
+            wait("WAIT_CAPACITY");
+            continue;
+        }
         auto request = std::make_unique<Request>();
         request->spec = spec;
+        request->spec.slot = slot;
+        request->spec.context_limit = spec.context_limit ? spec.context_limit : config_.max_context;
+        request->reservation = reservation;
         request->home_core = home(spec.home_chip);
-        request->generation = ++generations_[spec.slot];
+        request->generation = ++generations_[slot];
         if (request->generation > 1) ++request_reuses_;
         request->streams.resize(4 * config_.hidden);
-        request->frame = memory_.allocate(sram_[request->home_core], 4096 + 256 * config_.hidden);
+        request->frame = memory_.allocate(sram_[request->home_core], 4096 + 256 * config_.hidden, reservation);
         for (uint32_t layer = 0; layer < config_.layers; ++layer)
             request->windows.push_back(
-                memory_.allocate(sram_[request->home_core], config_.window * config_.latent * 8)
+                memory_.allocate(sram_[request->home_core], config_.window * config_.latent * 8, reservation)
             );
         for (auto &state : request->compressor_states)
-            state = memory_.allocate(sram_[request->home_core], 8 * 2 * config_.latent * 8);
+            state = memory_.allocate(sram_[request->home_core], 8 * 2 * config_.latent * 8, reservation);
         request->results.resize(7);
         request->lookup_results.resize(config_.chips);
-        bind_import(*request, i);
+        bind_import(*request, prepare_import(request->spec, reservation));
+        admission_waiting_.erase(spec.name);
         fabric_.record("ADMIT", request->home_core, request->identity());
         requests_.push_back(std::move(request));
         progress = true;
@@ -529,7 +554,7 @@ DecodeSimulation::Request &DecodeSimulation::find_request(const Identity &key) {
 }
 void DecodeSimulation::embed(Request &request) {
     if (!request.imported) throw std::runtime_error("decode before prefill import completed");
-    if (request.position >= config_.max_context) throw std::runtime_error("maximum context write rejected");
+    if (request.position >= request.spec.context_limit) throw std::runtime_error("maximum context write rejected");
     const auto &embedding = embedding_[request.spec.home_chip];
     const auto values = decode_values(memory_.read_local(request.home_core, embedding.handle));
     for (uint32_t stream = 0; stream < 4; ++stream)
@@ -593,8 +618,12 @@ void DecodeSimulation::append_compressed(Request &request, uint32_t source, cons
     auto &pages = request.pages[source];
     if (page_index == pages.size()) {
         Page page;
-        page.tail = memory_.allocate(sram_[request.home_core], config_.page_rows * packed_size(config_.latent));
-        page.keys = memory_.allocate(sram_[request.home_core], config_.page_rows * packed_size(config_.index_dim));
+        page.tail = memory_.allocate(
+            sram_[request.home_core], config_.page_rows * packed_size(config_.latent), request.reservation
+        );
+        page.keys = memory_.allocate(
+            sram_[request.home_core], config_.page_rows * packed_size(config_.index_dim), request.reservation
+        );
         pages.push_back(page);
     }
     auto &page = pages.at(page_index);
@@ -670,7 +699,7 @@ StepResult DecodeSimulation::gather_history(Request &request) {
         auto &page = request.pages[source].at(page_index);
         const auto source_handle = page.flush_done ? page.external : page.tail;
         if (!source_handle) throw std::runtime_error("history has no authoritative copy");
-        auto destination = memory_.allocate(sram_[request.home_core], memory_.size(source_handle));
+        auto destination = memory_.allocate(sram_[request.home_core], memory_.size(source_handle), request.reservation);
         Message message{request.identity(kFetch, page_index),
                         request.home_core,
                         request.home_core,
@@ -753,8 +782,8 @@ StepResult DecodeSimulation::dispatch(Request &request) {
     const auto lane = request.dispatch_next;
     const bool shared = lane == 6;
     const auto owner = shared ? request.home_core + 5 : expert_owner(request.routes[lane]);
-    auto source = memory_.allocate(sram_[request.home_core], request.x.size() * 8);
-    auto destination = memory_.allocate(sram_[owner], request.x.size() * 8);
+    auto source = memory_.allocate(sram_[request.home_core], request.x.size() * 8, request.reservation);
+    auto destination = memory_.allocate(sram_[owner], request.x.size() * 8, request.reservation);
     memory_.write_local(request.home_core, source, encode_values(request.x));
     Message message{
         request.identity(shared ? kShared : kExpert, lane),
@@ -900,10 +929,11 @@ bool DecodeSimulation::step_expert(uint32_t core) {
         }
         memory_.release(work.incoming.source);
         memory_.release(work.incoming.destination);
-        work.output = memory_.allocate(sram_[core], result.size() * 8);
+        const auto reservation = find_request(work.incoming.key).reservation;
+        work.output = memory_.allocate(sram_[core], result.size() * 8, reservation);
         memory_.write_local(core, work.output, encode_values(result));
         const auto destination_core = find_request(work.incoming.key).home_core;
-        work.destination = memory_.allocate(sram_[destination_core], result.size() * 8);
+        work.destination = memory_.allocate(sram_[destination_core], result.size() * 8, reservation);
         work.computed = true;
         fabric_.record(work.incoming.kind == kLookup ? "LOOKUP_COMPUTE" : "EXPERT_COMPUTE", core, work.incoming.key);
         return StepResult::Progress;
@@ -931,7 +961,8 @@ StepResult DecodeSimulation::flush_pages(Request &request) {
             auto &page = request.pages[source][i];
             if (!page.flush_sent && (page.valid == config_.page_rows || request.finishing)) {
                 if (!page.external)
-                    page.external = memory_.allocate(bailu_[request.spec.home_chip], memory_.size(page.tail));
+                    page.external =
+                        memory_.allocate(bailu_[request.spec.home_chip], memory_.size(page.tail), request.reservation);
                 Message message{request.identity(kStore, i),
                                 request.home_core,
                                 request.home_core,
@@ -1030,8 +1061,8 @@ bool DecodeSimulation::step_request(Request &request) {
                     }
                 if (rows.empty()) rows.push_back(-1);
                 const auto owner = home(chip) + 6;
-                auto source = memory_.allocate(sram_[request.home_core], rows.size() * 8);
-                auto destination = memory_.allocate(sram_[owner], rows.size() * 8);
+                auto source = memory_.allocate(sram_[request.home_core], rows.size() * 8, request.reservation);
+                auto destination = memory_.allocate(sram_[owner], rows.size() * 8, request.reservation);
                 memory_.write_local(request.home_core, source, encode_values(rows));
                 Message message{
                     request.identity(kLookup, chip), request.home_core, owner, chip, kLookup, source, destination
@@ -1126,6 +1157,8 @@ void DecodeSimulation::retire(Request &request) {
         memory_.release(state);
     }
     memory_.release(request.frame);
+    memory_.release_reservation(request.reservation);
+    request.reservation = 0;
     request.retired = true;
     fabric_.record("REQUEST_DRAINED", request.home_core, request.identity());
 }
@@ -1135,30 +1168,54 @@ uint32_t DecodeSimulation::completed_requests() const {
     });
 }
 void DecodeSimulation::run() {
-    if (running_ || specifications_.empty()) throw std::runtime_error("service already launched or empty");
+    close_input();
+    start();
+    while (!step()) {}
+}
+void DecodeSimulation::start() {
+    if (running_) throw std::runtime_error("service already launched");
     running_ = true;
     ++launch_count_;
     fabric_.record("SERVICE_LAUNCH", 0);
-    uint64_t idle_ticks = 0;
-    while (completed_requests() != specifications_.size() || !fabric_.idle()) {
-        bool progress = fabric_.deliver_due();
-        progress |= admit_requests();
-        for (uint32_t core = 0; core < work_.size(); ++core) {
-            progress |= receive(core);
-            progress |= step_expert(core);
-        }
-        for (auto &request : requests_)
-            progress |= step_request(*request);
-        for (uint32_t endpoint = 0; endpoint < fabric_.endpoint_count(); ++endpoint) {
-            const auto index = config_.reverse_batcher ? fabric_.endpoint_count() - 1 - endpoint : endpoint;
-            progress |= fabric_.step_batcher(index);
-        }
-        fabric_.advance_tick();
-        idle_ticks = progress ? 0 : idle_ticks + 1;
-        if (idle_ticks > 10000 || fabric_.tick() > 10000000)
-            throw std::runtime_error("service progress failure: inspect pending request/program/credit state");
+}
+void DecodeSimulation::close_input() { input_closed_ = true; }
+bool DecodeSimulation::waiting_for_input() const {
+    return running_ && !input_closed_ && completed_requests() == requests_.size() && fabric_.idle();
+}
+uint32_t DecodeSimulation::output_token(const Identity &key) const {
+    for (const auto &request : requests_) {
+        if (request->spec.slot != key.slot || request->generation != key.generation) continue;
+        const auto prefix = request->spec.prefill.tokens.size();
+        if (key.position > prefix && key.position - prefix <= request->generated.size())
+            return request->generated[key.position - prefix - 1];
     }
-    fabric_.record("SERVICE_DRAINED", 0);
+    throw std::invalid_argument("unknown output token identity");
+}
+bool DecodeSimulation::step() {
+    if (!running_) throw std::runtime_error("service has not launched");
+    if (drained_) return true;
+    if (input_closed_ && completed_requests() == specifications_.size() && fabric_.idle()) {
+        drained_ = true;
+        fabric_.record("SERVICE_DRAINED", 0);
+        return true;
+    }
+    bool progress = fabric_.deliver_due();
+    progress |= admit_requests();
+    for (uint32_t core = 0; core < work_.size(); ++core) {
+        progress |= receive(core);
+        progress |= step_expert(core);
+    }
+    for (auto &request : requests_)
+        progress |= step_request(*request);
+    for (uint32_t endpoint = 0; endpoint < fabric_.endpoint_count(); ++endpoint) {
+        const auto index = config_.reverse_batcher ? fabric_.endpoint_count() - 1 - endpoint : endpoint;
+        progress |= fabric_.step_batcher(index);
+    }
+    fabric_.advance_tick();
+    idle_ticks_ = progress || waiting_for_input() ? 0 : idle_ticks_ + 1;
+    if (idle_ticks_ > 10000)
+        throw std::runtime_error("service progress failure: inspect pending request/program/credit state");
+    return false;
 }
 
 void DecodeSimulation::write_report(const std::filesystem::path &output) const {
@@ -1177,19 +1234,21 @@ void DecodeSimulation::write_report(const std::filesystem::path &output) const {
            << ",\"custom_batcher_steps\":" << fabric_.custom_program_steps()
            << ",\"credit_stalls\":" << fabric_.credit_stalls() << ",\"bailu_fetches\":" << history_fetches_
            << ",\"kv_rows_committed\":" << kv_rows_ << ",\"slot_reuses\":" << request_reuses_ << ",\"all_drained\":"
-           << (fabric_.idle() && completed_requests() == specifications_.size() ? "true" : "false")
+           << (drained_ && fabric_.idle() && completed_requests() == specifications_.size() ? "true" : "false")
            << ",\"config\":{\"layers\":" << config_.layers << ",\"hidden\":" << config_.hidden
            << ",\"latent\":" << config_.latent << ",\"index_dim\":" << config_.index_dim
            << ",\"heads\":" << config_.heads << ",\"intermediate\":" << config_.intermediate
            << ",\"vocabulary\":" << config_.vocabulary << ",\"window\":" << config_.window
            << ",\"page_rows\":" << config_.page_rows << ",\"index_top_k\":" << config_.index_top_k
-           << ",\"max_context\":" << config_.max_context << "},\"requests\":[";
+           << ",\"max_context\":" << config_.max_context << ",\"max_slots\":" << config_.max_slots
+           << ",\"max_pending\":" << config_.max_pending << "},\"admission_waits\":" << admission_waits_
+           << ",\"input_closed\":" << (input_closed_ ? "true" : "false") << ",\"requests\":[";
     for (size_t i = 0; i < requests_.size(); ++i) {
         const auto &request = *requests_[i];
         if (i) report << ',';
         report << "{\"name\":" << json_string(request.spec.name) << ",\"slot\":" << request.spec.slot
                << ",\"generation\":" << request.generation << ",\"home_chip\":" << request.spec.home_chip
-               << ",\"prompt\":";
+               << ",\"context_limit\":" << request.spec.context_limit << ",\"prompt\":";
         json_integers(report, request.spec.prefill.tokens);
         report << ",\"processed_length\":" << request.position
                << ",\"prefill_next_token\":" << request.prefill_next_token
@@ -1245,7 +1304,7 @@ void DecodeSimulation::write_report(const std::filesystem::path &output) const {
         const auto &region = memory_.regions()[i];
         report << "{\"tier\":" << static_cast<int>(region.tier) << ",\"owner\":" << region.owner
                << ",\"capacity\":" << region.capacity << ",\"used\":" << region.used << ",\"peak\":" << region.peak
-               << '}';
+               << ",\"reserved\":" << region.reserved << ",\"committed_peak\":" << region.committed_peak << '}';
     }
     report << "]}\n";
     std::ofstream events(output / "events.jsonl");

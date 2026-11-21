@@ -31,8 +31,8 @@ The standalone CMake target builds its sources directly. It does not use a
 previously installed simpler wheel. The ordinary Python Worker path retains
 its existing package installation requirements.
 
-`run.sh` builds a Release binary and runs both CTest entries: protocol checks,
-then eleven numerical scenarios and thirteen expected failures. The test driver
+`run.sh` builds a Release binary and runs three CTest entries: protocol checks,
+eleven numerical scenarios and thirteen expected failures, and live request/admission checks. The test driver
 computes prefill outside the WSE executable using the NumPy fixture producer.
 Outputs are in
 `build/wse-persistent/validation/`:
@@ -45,6 +45,12 @@ Outputs are in
 | `single/events.jsonl`, `multi/events.jsonl` | One event per transfer stage or request observation point |
 | `single/programs.json`, `multi/programs.json` | Request AICore, expert/lookup service, and batcher instruction images |
 | `single/checks.json`, `multi/checks.json` | Independent NumPy comparison and lifecycle assertions |
+
+Live admission results are in `build/wse-persistent/live-validation/`. They cover
+external stdin input, submission after decode has started, bounded ingress,
+capacity waits, slot reuse, rejection followed by successful service, and the
+fixture's full 128-position context. See [live serving and capacity contracts](serving.md)
+for the C++ API, stdin protocol, launch limits and resource accounting.
 
 Individual runs explicitly separate external prefill and WSE decode:
 
@@ -147,14 +153,14 @@ flowchart LR
 The WSE executable never processes prompt positions. The external NumPy fixture
 producer processes the prompt and exports the first sampled token together with
 the complete continuation state. This producer is a test/reference tool, not a
-production prefill runtime. The C++ loader validates the snapshot before launch;
+production prefill runtime. The C++ loader validates the snapshot before submission;
 the first request instruction imports its payload through the batcher. Only
 after every chunk is delivered, published and consumed does `PREFILL_IMPORTED`
 allow embedding the first decode input at position `prompt_length`.
 
-All finite-trace snapshots are staged in simulated Host regions before service
-launch, including snapshots for requests admitted later. No live external
-producer connection is modeled. Each configured `decode_inputs` pass processes
+Finite traces register snapshot state before launch; live producers can submit
+snapshots between service steps through the stdin interface. Simulated Host
+payload buffers are created only after capacity admission. Each configured `decode_inputs` pass processes
 the current token and samples its successor. `prefill_next_token` is the first
 decode input; the final sampled successor has no KV until another input pass.
 
@@ -224,7 +230,7 @@ are rejected before service launch.
 
 Still outside this executable: full 144-core/chip geometry, four PE execution
 within a core, 2D mesh routing/link contention, maximum-million-token capacity,
-pregranted page-pool quotas, live prefill-provider integration, arbitrary
+native device page-pool allocation, direct prefill-runtime integration beyond snapshot submission, arbitrary
 in-flight cancellation/fault recovery, strict-versus-grouped strategy comparison,
 native Worker/HBG integration, full checkpoint numerical validation and
 calibrated chip timing. Logical ticks represent ordering only.

@@ -25,6 +25,7 @@ namespace wse::persistent {
 using Bytes = std::vector<uint8_t>;
 using Values = std::vector<double>;
 using Handle = uint64_t;
+using Reservation = uint64_t;
 
 enum class Tier { Sram, Bailu, Batcher, Host };
 struct Region {
@@ -33,16 +34,21 @@ struct Region {
     uint64_t capacity;
     uint64_t used = 0;
     uint64_t peak = 0;
+    uint64_t reserved = 0;
+    uint64_t committed_peak = 0;
 };
 
 class Memory {
 public:
     uint32_t add_region(Tier tier, uint32_t owner, uint64_t capacity);
-    Handle allocate(uint32_t region, size_t bytes);
+    Reservation try_reserve(const std::vector<uint64_t> &bytes);
+    void release_reservation(Reservation reservation);
+    Handle allocate(uint32_t region, size_t bytes, Reservation reservation = 0);
     void release(Handle handle);
     void write_local(uint32_t core, Handle handle, const Bytes &bytes);
     const Bytes &read_local(uint32_t core, Handle handle) const;
     void load_before_launch(Handle handle, const Bytes &bytes);
+    void stage_host(Handle handle, const Bytes &bytes);
     Bytes inspect_after_drain(Handle handle) const;
     uint32_t region_of(Handle handle) const;
     const std::vector<Region> &regions() const { return regions_; }
@@ -63,11 +69,17 @@ private:
         uint32_t deliveries = 0;
         bool visible = true;
         uint64_t charged = 0;
+        Reservation reservation = 0;
+    };
+    struct Grant {
+        std::vector<uint64_t> limits, used;
     };
     Allocation &get(Handle handle);
     const Allocation &get(Handle handle) const;
     std::vector<Region> regions_;
     std::map<Handle, Allocation> allocations_;
+    std::map<Reservation, Grant> grants_;
+    Reservation next_grant_ = 1;
     Handle next_ = 1;
     uint64_t live_transfers_ = 0;
 };

@@ -33,6 +33,46 @@ void rejects(Function function, const char *message) {
 
 int main() {
     try {
+        Memory reserved;
+        const auto pool = reserved.add_region(Tier::Sram, 0, 512);
+        const auto grant = reserved.try_reserve({384});
+        require(grant != 0, "capacity grant rejected");
+        rejects(
+            [&] {
+                reserved.add_region(Tier::Host, 0, 128);
+            },
+            "live grant region layout changed"
+        );
+        require(reserved.try_reserve({256}) == 0, "reserved capacity granted twice");
+        const auto page = reserved.allocate(pool, 256, grant);
+        rejects(
+            [&] {
+                reserved.allocate(pool, 256, grant);
+            },
+            "allocation exceeded its own grant"
+        );
+        rejects(
+            [&] {
+                reserved.allocate(pool, 256);
+            },
+            "allocation stole reserved capacity"
+        );
+        rejects(
+            [&] {
+                reserved.release_reservation(grant);
+            },
+            "live grant released"
+        );
+        reserved.release(page);
+        require(reserved.regions()[pool].reserved == 384, "page release lost reservation credit");
+        reserved.release_reservation(grant);
+        require(reserved.regions()[pool].reserved == 0, "grant leaked after drain");
+        const auto all = reserved.try_reserve({512});
+        require(all != 0, "reclaimed capacity unavailable");
+        reserved.release_reservation(all);
+        reserved.add_region(Tier::Bailu, 0, 128);
+        require(reserved.try_reserve({384, 256}) == 0, "impossible multi-region grant accepted");
+        require(reserved.regions()[pool].reserved == 0, "failed multi-region grant leaked capacity");
         Memory memory;
         const auto a = memory.add_region(Tier::Sram, 0, 512);
         const auto b = memory.add_region(Tier::Sram, 1, 512);
@@ -55,7 +95,13 @@ int main() {
         const auto cold = memory.allocate(external, 8);
         const auto host_region = memory.add_region(Tier::Host, 0, 512);
         const auto host_payload = memory.allocate(host_region, 8);
-        memory.load_before_launch(host_payload, encode_values({4.0}));
+        memory.stage_host(host_payload, encode_values({4.0}));
+        rejects(
+            [&] {
+                memory.stage_host(source, encode_values({4.0}));
+            },
+            "Host staging overwrote SRAM"
+        );
         rejects(
             [&] {
                 memory.read_local(0, host_payload);

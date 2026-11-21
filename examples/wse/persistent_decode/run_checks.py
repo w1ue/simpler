@@ -57,6 +57,7 @@ def trace_checks(directory):
     assert result["bytes_transferred"] == result["prefill_import_bytes"] + result["decode_bytes_transferred"]
     for region in result["memory"]:
         assert 0 <= region["used"] <= region["peak"] <= region["capacity"]
+        assert region["reserved"] == 0 and region["peak"] <= region["committed_peak"] <= region["capacity"]
         if region["tier"] in (1, 3):
             assert region["used"] == 0, "KV or Host import buffers leaked after request drain"
     assert len([event for event in events if event["event"] == "SERVICE_LAUNCH"]) == 1

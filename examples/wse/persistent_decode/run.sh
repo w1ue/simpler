@@ -22,3 +22,4 @@ cmake -S "$repo_dir/src/wse/platform/sim/persistent" -B "$build_dir" \
 cmake --build "$build_dir" --parallel 2
 ctest --test-dir "$build_dir" --output-on-failure
 echo "Results: $build_dir/validation/{single,multi}/results.json"
+echo "Live admission: $build_dir/live-validation/validation.json"

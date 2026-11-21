@@ -41,6 +41,11 @@ struct DecodeConfig {
     uint32_t inbox_capacity = 2;
     bool reverse_batcher = false;
     bool cancel_long_request = false;
+    uint32_t max_slots = 16;
+    uint32_t max_pending = 64;
+    uint64_t sram_bytes = 16 * 1024 * 1024;
+    uint64_t bailu_bytes = 64 * 1024 * 1024;
+    uint64_t host_bytes = 128 * 1024 * 1024;
 };
 
 struct RequestSpec {
@@ -51,7 +56,9 @@ struct RequestSpec {
     uint32_t decode_inputs;
     std::string admit_after;
     uint32_t admit_after_outputs = 0;
+    uint32_t context_limit = 0;
 };
+constexpr uint32_t automatic_slot = UINT32_MAX;
 
 struct Matrix {
     uint32_t rows;
@@ -90,6 +97,12 @@ public:
     void register_batcher_operation(uint32_t id, std::function<StepResult(const Message &, uint32_t)> operation);
     void register_core_operation(uint32_t id, std::function<void(Values &)> operation);
     void add_request(RequestSpec request);
+    bool submit_request(RequestSpec request);
+    void start();
+    void close_input();
+    bool step();
+    bool waiting_for_input() const;
+    uint32_t output_token(const Identity &key) const;
     void run();
     void write_report(const std::filesystem::path &output) const;
     const Fabric &fabric() const { return fabric_; }
@@ -110,7 +123,6 @@ private:
     std::vector<uint32_t> sram_;
     std::vector<uint32_t> bailu_;
     std::vector<uint32_t> host_;
-    std::vector<std::vector<ImportImage>> import_images_;
     std::vector<uint32_t> batcher_regions_;
     std::vector<std::vector<LayerWeights>> weights_;
     std::vector<Matrix> embedding_;
@@ -124,6 +136,10 @@ private:
     Program core_program_;
     Program service_program_;
     bool running_ = false;
+    bool input_closed_ = false, drained_ = false;
+    uint64_t idle_ticks_ = 0, admission_waits_ = 0;
+    std::vector<uint64_t> baseline_used_;
+    std::map<std::string, std::string> admission_waiting_;
     uint64_t launch_count_ = 0;
     uint64_t core_steps_ = 0;
     uint64_t history_fetches_ = 0;
@@ -137,8 +153,9 @@ private:
     uint32_t expert_owner(uint32_t expert) const;
     void deploy_weights();
     bool admit_requests();
-    std::vector<ImportImage> prepare_import(const RequestSpec &spec);
-    void bind_import(Request &request, size_t specification_index);
+    std::vector<uint64_t> request_budget(const RequestSpec &spec) const;
+    std::vector<ImportImage> prepare_import(const RequestSpec &spec, Reservation reservation);
+    void bind_import(Request &request, const std::vector<ImportImage> &images);
     StepResult import_prefill(Request &request);
     bool receive(uint32_t core);
     bool step_expert(uint32_t core);
