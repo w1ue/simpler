@@ -9,6 +9,10 @@ It is a **scaled structural fixture**, with synthetic deterministic weights.
 It does not validate a DeepSeek checkpoint, native batcher instructions, the
 ordinary Worker/HBG path, a physical mesh, or chip performance.
 
+The [static-plan and KV-quota fixture](static_plan/README.md) separately checks
+preallocated resources, fixed AICore control flow, Host page renewal and
+draining over this backend's Memory/Fabric, with its own integer oracle.
+
 ## Run and inspect
 
 Prerequisites: Linux or WSL, a C++17 compiler, CMake >= 3.16, and Python >= 3.9.
@@ -38,7 +42,7 @@ Outputs are in
 `build/wse-persistent/validation/`:
 
 | File | Meaning |
-| --- | --- |
+| ---- | ------- |
 | `validation.json` | All numerical and rejection scenario checks |
 | `external_prefill/*.wsepf`, `external_prefill/manifest.json` | External prefill snapshots and producer metadata |
 | `single/results.json`, `multi/results.json` | Tokens, logits, layer checksums, final KV/key/window/state, region peaks |
@@ -73,7 +77,7 @@ program counter and lets other actors make progress. Programs and operation
 registries are installed before `run()`.
 
 | Actor | Installed with | Default operations |
-| --- | --- | --- |
+| ----- | -------------- | ------------------ |
 | Request AICore | `set_core_program()` | 20 import prefill, then 10 embed, 11 prepare/lookup, 12 index, 13 gather, 14 attention, 15 router, 16 dispatch, 17 combine, 18 advance layer, 19 sample |
 | Expert/lookup AICore | `set_service_program()` | 30 compute at the fixed weight/table owner, 31 send result |
 | Batcher endpoint | `set_batcher_program()` | 1 acquire destination credit, 2 submit copy, 3 await delivery, 4 publish notification |

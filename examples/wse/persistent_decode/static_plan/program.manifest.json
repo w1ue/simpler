@@ -1,0 +1,88 @@
+{
+  "format": "simpler.wse.program.v2",
+  "contract": "static_protocol_u64_kv_quota_v2",
+  "artifact": {
+    "kind": "cpu_cpp_source",
+    "path": "static_plan_probe.cpp",
+    "sha256": "23e1b454b58bd667a1da2647721d853434479e749eb0669895ad5fcbe5e40756",
+    "includes": {
+      "kv_quota.h": "ab18dcf2f7831ef6b1e7e4cb1f9dfeb3605984901a5700c6b4de327713b10c33"
+    }
+  },
+  "bounds": {
+    "chips": 2,
+    "cores_per_chip": 8,
+    "cores_per_endpoint": 2,
+    "request_slots": 4,
+    "layers": 40,
+    "routed_experts": 8,
+    "routed_top_k": 6,
+    "layer_banks": 2,
+    "kv_page_table_entries_per_slot": 16,
+    "kv_pool_cells_per_chip": 32,
+    "deferred_output_cells_per_slot": 4
+  },
+  "storage": {
+    "alignment": 128,
+    "packet_bytes": 128,
+    "request_frame_bytes": 104,
+    "service_frame_bytes": 24,
+    "batcher_control_allowance_bytes": 8192,
+    "quota_frame_bytes": 256,
+    "quota_packet_bytes": 256
+  },
+  "layout": {
+    "per_slot_home": [
+      "request_frame",
+      "seed",
+      "fetch",
+      "store",
+      "output",
+      "ack"
+    ],
+    "per_slot_host": [
+      "seed",
+      "output",
+      "ack"
+    ],
+    "per_slot_output_cell": [
+      "home_payload",
+      "host_payload"
+    ],
+    "per_chip_kv_pool_cell": [
+      "bailu_payload"
+    ],
+    "per_slot_quota": [
+      "device_state",
+      "host_initial_kv"
+    ],
+    "per_slot_control_lane": [
+      "low_tx",
+      "low_rx",
+      "grant_tx",
+      "grant_rx",
+      "ack_tx",
+      "ack_rx"
+    ],
+    "per_slot_bank_lane": [
+      "home_send",
+      "home_result"
+    ],
+    "per_slot_bank_expert": [
+      "expert_input",
+      "expert_output",
+      "service_frame"
+    ]
+  },
+  "protocol": {
+    "id": "static_protocol_memory_fabric_kv_quota_v2",
+    "kv_initial_u64": 5,
+    "ready": "delivery_then_publication",
+    "input_reuse": "last_use_then_related_transfer_retirement",
+    "request_reuse": "outputs_and_transfers_and_services_drained",
+    "output_ack": "generation_only_local_token_feedback",
+    "kv_grant": "install_then_ack",
+    "kv_low_watermark": "claimed_pages_includes_inflight",
+    "kv_control": "separate_bounded_fabric"
+  }
+}
