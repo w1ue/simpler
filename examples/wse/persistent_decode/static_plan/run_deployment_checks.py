@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-"""Check the deployment input seam, including an actual Memory/Fabric execution."""
+"""Check deployment inputs against actual Memory and the hardware-path model."""
 
 import argparse
 import copy
@@ -48,6 +48,12 @@ def check_rejections(original, write_case):
     reject("role_collision", lambda d: d["placement"]["routed_expert_core"].__setitem__(0, 0), "role owner collision")
     reject("non_home_bailu_owner", lambda d: d["placement"]["home_core_by_slot"].__setitem__(0, 1), "home must be")
     reject("zero_credit", lambda d: d["transport"].update(inbox_entries_per_core=0), "positive bounded integer")
+    reject("hardware_zero_rate", lambda d: d["hardware"].update(bailu_bytes_per_tick=0), "positive bounded integer")
+    reject("hardware_bool_latency", lambda d: d["hardware"].update(noc_latency_ticks=True), "positive bounded integer")
+    reject(
+        "hardware_control_progress", lambda d: d["hardware"].update(batcher_wait_entries=1), "reserved control context"
+    )
+    reject("hardware_job_bound", lambda d: d["hardware"].update(noc_queue_entries=65536), "transport jobs exceed")
     reject("bool_capacity", lambda d: d["capacity_bytes"].update(sram_per_core=True), "positive bounded integer")
     reject("unaligned_capacity", lambda d: d["capacity_bytes"].update(sram_per_core=262143), "128-byte aligned")
     reject("insufficient_sram", lambda d: d["capacity_bytes"].update(sram_per_core=128), "capacity exceeded: sram")
@@ -156,6 +162,16 @@ def run(input_path, source_root, compiler, build, summary_path):
             region["tier"] = tiers[region["tier"]]
         assert result["memory"] == expected_regions
         assert result["transport"] == data["transport"]
+        resources = [json.loads(row) for row in (directory / "run/transport_events.jsonl").read_text().splitlines()]
+        pushes = {e["transfer_id"]: e["tick"] for e in resources if e["event"] == "CORE_PUSH_SUBMITTED"}
+        assert pushes
+        for event in resources:
+            if event["event"] == "RECEIVER_VISIBLE" and event["transfer_id"] in pushes:
+                assert event["tick"] - pushes[event["transfer_id"]] == data["hardware"]["noc_latency_ticks"]
+            if event["event"] == "EXTERNAL_SERVICE":
+                assert event["bytes"] <= data["hardware"]["bailu_bytes_per_tick"]
+            if event["event"] == "HOST_LINK_SERVICE":
+                assert event["bytes"] <= data["hardware"]["external_bytes_per_tick"]
         checks = check_run(directory / "run", "baseline")
         events = [json.loads(row) for row in (directory / "run/events.jsonl").read_text().splitlines()]
         for event in events:
@@ -189,6 +205,18 @@ def run(input_path, source_root, compiler, build, summary_path):
         return row["slot"], row["generation"], row["position"]
 
     assert {key(r): r["token"] for r in baseline["outputs"]} == {key(r): r["token"] for r in changed["outputs"]}
+    hardware = copy.deepcopy(original)
+    hardware["hardware"] = dict(
+        batcher_wait_entries=2,
+        noc_queue_entries=16,
+        direct_queue_entries=2,
+        noc_latency_ticks=4,
+        external_latency_ticks=7,
+        bailu_bytes_per_tick=32,
+        external_bytes_per_tick=32,
+    )
+    changed = execute("hardware_tuned", hardware)
+    assert {key(r): r["token"] for r in baseline["outputs"]} == {key(r): r["token"] for r in changed["outputs"]}
     pressured = copy.deepcopy(original)
     pressured["transport"] = dict(inbox_entries_per_core=1, queue_entries_per_endpoint=2)
     changed = execute("transport_pressure", pressured)
@@ -208,7 +236,7 @@ def run(input_path, source_root, compiler, build, summary_path):
     summary = dict(
         positive=positive,
         negative=negative,
-        scope="Host-side simulation input adapter + actual WSE Memory/Fabric probe",
+        scope="Host simulation adapter, actual WSE Memory and bounded hardware-path probe",
         native_simpler_api=False,
         hardware_execution=False,
     )

@@ -9,11 +9,12 @@
     "placement",
     "capacity_bytes",
     "transport",
-    "kv_quota"
+    "kv_quota",
+    "hardware"
   ],
   "properties": {
     "format": {
-      "const": "simpler.wse.deployment.v2"
+      "const": "simpler.wse.deployment.v3"
     },
     "program": {
       "type": "object",
@@ -162,6 +163,56 @@
         },
         "control_queue_entries_per_endpoint": {
           "$ref": "#/$defs/entries"
+        }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batcher_wait_entries",
+        "noc_queue_entries",
+        "direct_queue_entries",
+        "noc_latency_ticks",
+        "external_latency_ticks",
+        "bailu_bytes_per_tick",
+        "external_bytes_per_tick"
+      ],
+      "properties": {
+        "batcher_wait_entries": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 65536
+        },
+        "noc_queue_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "direct_queue_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "noc_latency_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "external_latency_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "bailu_bytes_per_tick": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "external_bytes_per_tick": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
         }
       }
     }

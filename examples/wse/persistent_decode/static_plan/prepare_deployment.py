@@ -13,7 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
-FORMAT = "simpler.wse.deployment.v2"
+FORMAT = "simpler.wse.deployment.v3"
 BOUNDS = dict(
     chips=2,
     cores_per_chip=8,
@@ -30,15 +30,19 @@ BOUNDS = dict(
 STORAGE = dict(
     alignment=128,
     packet_bytes=128,
-    request_frame_bytes=104,
+    request_frame_bytes=88,
+    async_frame_bytes=512,
+    background_bytes=1024,
     service_frame_bytes=24,
     batcher_control_allowance_bytes=8192,
     quota_frame_bytes=256,
     quota_packet_bytes=256,
 )
 LAYOUT = {
-    "per_slot_home": ["request_frame", "seed", "fetch", "store", "output", "ack"],
-    "per_slot_host": ["seed", "output", "ack"],
+    "per_slot_home": ["request_frame", "fetch", "ack"],
+    "per_slot_async": ["state", "activation_tx", "activation_rx", "retire_tx", "retire_rx", "dirty", "output_ring"],
+    "per_background": ["host_import", "bailu_target"],
+    "per_slot_host": ["ack"],
     "per_slot_output_cell": ["home_payload", "host_payload"],
     "per_chip_kv_pool_cell": ["bailu_payload"],
     "per_slot_quota": ["device_state", "host_initial_kv"],
@@ -47,15 +51,37 @@ LAYOUT = {
     "per_slot_bank_expert": ["expert_input", "expert_output", "service_frame"],
 }
 PROTOCOL = dict(
-    id="static_protocol_memory_fabric_kv_quota_v2",
+    id="static_protocol_memory_hardware_v3",
     kv_initial_u64=5,
     ready="delivery_then_publication",
     input_reuse="last_use_then_related_transfer_retirement",
     request_reuse="outputs_and_transfers_and_services_drained",
-    output_ack="generation_only_local_token_feedback",
+    output_ack="bounded_ring_background_consumption",
     kv_grant="install_then_ack",
     kv_low_watermark="claimed_pages_includes_inflight",
-    kv_control="separate_bounded_fabric",
+    kv_control="shared_batcher_with_progress_reservation",
+)
+
+
+HARDWARE = dict(
+    batcher_wait_entries=8,
+    noc_queue_entries=32,
+    direct_queue_entries=8,
+    noc_latency_ticks=2,
+    external_latency_ticks=3,
+    bailu_bytes_per_tick=64,
+    external_bytes_per_tick=64,
+)
+
+
+HARDWARE_MODEL = dict(
+    bailu_banks_per_chip=2,
+    batcher_actions_per_endpoint_tick=1,
+    core_payload_ports=1,
+    deterministic_scope="within_chip",
+    max_jobs=4096,
+    payload_handle_entries=2048,
+    dirty_entries_per_slot=4,
 )
 
 
@@ -105,28 +131,30 @@ def reference(base, relative, digest, kind):
 
 def validate(input_path):
     data = read_json(input_path)
-    keys(data, ("format", "program", "placement", "capacity_bytes", "transport", "kv_quota"), "deployment")
+    keys(data, ("format", "program", "placement", "capacity_bytes", "transport", "kv_quota", "hardware"), "deployment")
     require(data["format"] == FORMAT, "unsupported deployment format")
     keys(data["program"], ("manifest", "sha256"), "program")
     manifest_path = reference(input_path.parent, data["program"]["manifest"], data["program"]["sha256"], "manifest")
     program = read_json(manifest_path)
-    keys(program, ("format", "contract", "artifact", "bounds", "storage", "layout", "protocol"), "manifest")
+    keys(program, ("format", "contract", "artifact", "bounds", "storage", "layout", "protocol", "hardware"), "manifest")
     require(
-        program["format"] == "simpler.wse.program.v2" and program["contract"] == "static_protocol_u64_kv_quota_v2",
+        program["format"] == "simpler.wse.program.v3" and program["contract"] == "static_protocol_u64_hardware_v3",
         "unsupported program contract",
     )
     require(
         program["bounds"] == BOUNDS
         and program["storage"] == STORAGE
         and program["layout"] == LAYOUT
-        and program["protocol"] == PROTOCOL,
+        and program["protocol"] == PROTOCOL
+        and program["hardware"] == HARDWARE_MODEL,
         "unsupported compiled program contract",
     )
     keys(program["artifact"], ("kind", "path", "sha256", "includes"), "artifact")
     require(program["artifact"]["kind"] == "cpu_cpp_source", "unsupported artifact kind")
     artifact = reference(manifest_path.parent, program["artifact"]["path"], program["artifact"]["sha256"], "artifact")
-    keys(program["artifact"]["includes"], ("kv_quota.h",), "artifact.includes")
-    reference(artifact.parent, "kv_quota.h", program["artifact"]["includes"]["kv_quota.h"], "quota header")
+    keys(program["artifact"]["includes"], ("kv_quota.h", "hardware_transport.h"), "artifact.includes")
+    for name, digest in program["artifact"]["includes"].items():
+        reference(artifact.parent, name, digest, "program header")
     placement = data["placement"]
     keys(placement, ("home_core_by_slot", "routed_expert_core", "shared_expert_core_by_chip"), "placement")
     for key, length in (("home_core_by_slot", 4), ("routed_expert_core", 8), ("shared_expert_core_by_chip", 2)):
@@ -183,6 +211,20 @@ def validate(input_path):
         ),
         "initial KV grants exceed physical pool",
     )
+    keys(data["hardware"], tuple(HARDWARE), "hardware")
+    for name, value in data["hardware"].items():
+        number(value, name, 65536)
+    require(data["hardware"]["batcher_wait_entries"] >= 2, "batcher requires a reserved control context")
+    jobs = (
+        8
+        * (
+            data["transport"]["queue_entries_per_endpoint"]
+            + quota["control_queue_entries_per_endpoint"]
+            + data["hardware"]["noc_queue_entries"]
+        )
+        + data["hardware"]["direct_queue_entries"]
+    )
+    require(jobs <= HARDWARE_MODEL["max_jobs"], "transport jobs exceed compiled bound")
     return data, program, artifact
 
 
@@ -226,13 +268,8 @@ def prepare(input_path, output):
         chip = home // 8
         prefix = f"slot.{slot}"
         for name, r, size in (
-            ("control", sram[home], 104),
-            ("seed", sram[home], 128),
-            ("host_seed", host[chip], 128),
+            ("control", sram[home], 88),
             ("fetch", sram[home], 128),
-            ("store", sram[home], 128),
-            ("output", sram[home], 128),
-            ("host_output", host[chip], 128),
             ("host_ack", host[chip], 128),
             ("ack", sram[home], 128),
         ):
@@ -269,13 +306,32 @@ def prepare(input_path, output):
                     cell(f"slot.{slot}.control.{lane}.{name}", r, 256)
 
     quota_cells()
-    assert len(cells) == 460 + 2 * data["kv_quota"]["pool_pages_per_chip"]
+
+    def async_cells():
+        for slot, home in enumerate(p["home_core_by_slot"]):
+            chip = home // 8
+            cell(f"slot.{slot}.async.state", sram[home], 512)
+            for name, r in (
+                ("activation_tx", host[chip]),
+                ("activation_rx", sram[home]),
+                ("retire_tx", sram[home]),
+                ("retire_rx", host[chip]),
+            ):
+                cell(f"slot.{slot}.async.{name}", r, 128)
+            for index in range(4):
+                cell(f"slot.{slot}.dirty.{index}", sram[home], 128)
+        cell("background.host", host[0], 1024)
+        cell("background.bailu0", bailu[0], 1024)
+        cell("background.bailu1", bailu[0], 1024)
+
+    async_cells()
+    assert len(cells) == 479 + 2 * data["kv_quota"]["pool_pages_per_chip"]
     identity = dict(data)
     identity["program"] = dict(sha256=data["program"]["sha256"])
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     digest = hashlib.sha256(canonical).hexdigest()
     plan = dict(
-        format="simpler.wse.prepared.v2",
+        format="simpler.wse.prepared.v3",
         deployment_digest=digest,
         program_contract=program["contract"],
         input=data,
@@ -313,6 +369,8 @@ def prepare(input_path, output):
         header += f"inline constexpr uint32_t {generated} = {data['kv_quota'][name]};\n"
     deny = "true" if data["kv_quota"]["exhaustion_policy"] == "deny" else "false"
     header += f"inline constexpr bool quota_deny_on_exhaustion = {deny};\n"
+    for name, value in data["hardware"].items():
+        header += f"inline constexpr uint32_t {name} = {value};\n"
     header += "}\n"
     (output / "deployment_config.h").write_text(header, encoding="utf-8")
     return plan, artifact

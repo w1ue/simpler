@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-"""Build against current WSE Memory/Fabric and verify a bounded static protocol plan."""
+"""Build against WSE Memory and verify a bounded static protocol plan."""
 
 import argparse
 import hashlib
@@ -235,6 +235,7 @@ def run(source_root, compiler, build, output):
             "static_plan_probe.cpp": here / "static_plan_probe.cpp",
             "run_probe.py": Path(__file__),
             "kv_quota.h": here / "kv_quota.h",
+            "hardware_transport.h": here / "hardware_transport.h",
             "device.cpp": device,
             "device.h": device.with_suffix(".h"),
             "program.h": source_root / "src/wse/runtime/persistent/program.h",
@@ -245,7 +246,7 @@ def run(source_root, compiler, build, output):
     }
     summary["limits"] = contract["not_claimed"]
     summary["scope"] = (
-        "Protocol scalar workload over actual WSE Memory/Fabric; no AICore interpreter or resident generic runtime"
+        "Protocol scalar workload over actual WSE Memory and a bounded hardware-path model; no AICore interpreter"
     )
     summary["deployment_digest"] = prepared["deployment_digest"]
     summary["generated_header_sha256"] = hashlib.sha256((build / "deployment_config.h").read_bytes()).hexdigest()

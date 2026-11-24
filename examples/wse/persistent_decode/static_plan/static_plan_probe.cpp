@@ -22,6 +22,7 @@
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
+#include <tuple>
 
 namespace wp = wse::persistent;
 namespace {
@@ -30,7 +31,6 @@ constexpr uint64_t kModulus = 1000003;
 constexpr size_t kPacketBytes = 128;
 enum class Phase : uint32_t {
     Idle,
-    ImportSend,
     ImportWait,
     FetchSend,
     FetchWait,
@@ -38,14 +38,21 @@ enum class Phase : uint32_t {
     Dispatch,
     Results,
     StoreSend,
-    StoreWait,
-    OutputSend,
-    OutputWait,
-    DrainOutputs,
     RequestRetire,
     Done
 };
-enum Kind : uint32_t { Import = 1, Fetch, ExpertInput, ExpertResult, Store, Output, OutputAck, ImportKV };
+enum Kind : uint32_t {
+    Import = 1,
+    Fetch,
+    ExpertInput,
+    ExpertResult,
+    Store,
+    Output,
+    OutputAck,
+    ImportKV,
+    BackgroundImport,
+    Retire
+};
 
 void require(bool pass, const char *message) {
     if (!pass) throw std::runtime_error(message);
@@ -69,7 +76,7 @@ struct Frame {
     uint64_t generation = 0, hidden = 0, input = 0;
     uint32_t position = 0, layer = 0, requested = 0, emitted = 0, sent = 0, bitmap = 0;
     Phase phase = Phase::Idle;
-    uint32_t fetch_ready = 0, store_ready = 0, import_ready = 0, output_ready = 0;
+    uint32_t fetch_ready = 0;
     std::array<uint32_t, kLanes> routes{};
     uint32_t cancel_after = 0;
 };
@@ -78,7 +85,7 @@ struct ServiceFrame {
     uint64_t generation = 0;
 };
 static_assert(
-    sizeof(Frame) == 104 && sizeof(ServiceFrame) == 24, "CPU protocol frame ABI differs from program manifest"
+    sizeof(Frame) == 88 && sizeof(ServiceFrame) == 24, "CPU protocol frame ABI differs from program manifest"
 );
 struct ExpertBuffers {
     wp::Handle input = 0, output = 0, control = 0;
@@ -89,15 +96,44 @@ struct Bank {
     std::array<ExpertBuffers, kExperts + 1> expert{};
     std::array<uint32_t, kLanes> input_busy{};
 };
+struct AsyncRecord {
+    uint64_t generation = 0, value = 0;
+    uint32_t position = 0, layer = 0, flags = 0, reserved = 0;
+};
+struct AsyncImage {
+    uint64_t generation = 0, hot = 0;
+    uint32_t hot_position = 0, flags = 0;
+    std::array<AsyncRecord, 4> dirty{}, output{};
+};
+static_assert(sizeof(AsyncImage) <= 512);
+struct Binding {
+    uint64_t generation, initial;
+    uint32_t tokens, cancel_after;
+};
+struct AsyncEntry {
+    Frame frame{};
+    bool live = false, sent = false, ready = false;
+};
+struct DirtyEntry {
+    wp::Identity key{};
+    bool live = false, sent = false;
+};
 struct Slot {
     Frame state;
     uint32_t home = 0;
-    wp::Handle control = 0, seed = 0, host_seed = 0, fetch = 0, store = 0, output = 0, host_output = 0;
+    wp::Handle control = 0, fetch = 0, async_state = 0;
     wp::Handle host_ack = 0, ack = 0;
     std::array<wp::Handle, 4> deferred_output{}, deferred_host_output{};
-    std::array<Frame, 4> deferred_state{};
     std::array<Bank, kBanks> banks{};
-    bool output_held = false;
+    wp::Handle activation_tx = 0, activation_rx = 0, retire_tx = 0, retire_rx = 0;
+    std::array<wp::Handle, 4> dirty{};
+    std::array<AsyncEntry, 4> output_entries{};
+    std::array<DirtyEntry, 4> dirty_entries{};
+    wp::Handle hot = 0;
+    uint32_t hot_position = 0, host_next = 1;
+    uint64_t host_generation = 0;
+    bool activation_pending = false, retire_sent = false, retire_seen = false, host_busy = false;
+    bool output_blocked = false, dirty_blocked = false;
     uint64_t initial = 0, completed = 0;
 };
 struct Options {
@@ -111,7 +147,7 @@ class Probe {
 public:
     explicit Probe(const Options &options) :
         options_(options),
-        fabric_(memory_, 16, 8, options.credits, options.queue) {
+        fabric_(memory_, options.credits, options.queue, options.scenario) {
         for (uint32_t core = 0; core < 16; ++core)
             sram_[core] = memory_.add_region(wp::Tier::Sram, core, deployment::sram_per_core);
         for (uint32_t chip = 0; chip < 2; ++chip) {
@@ -126,12 +162,7 @@ public:
             auto &s = slots_[slot];
             s.home = deployment::home_cores[slot];
             s.control = allocate(sram_[s.home], sizeof(Frame));
-            s.seed = allocate(sram_[s.home], kPacketBytes);
-            s.host_seed = allocate(host_[s.home / 8], kPacketBytes);
             s.fetch = allocate(sram_[s.home], kPacketBytes);
-            s.store = allocate(sram_[s.home], kPacketBytes);
-            s.output = allocate(sram_[s.home], kPacketBytes);
-            s.host_output = allocate(host_[s.home / 8], kPacketBytes);
             s.host_ack = allocate(host_[s.home / 8], kPacketBytes);
             s.ack = allocate(sram_[s.home], kPacketBytes);
             for (uint32_t index = 0; index < 4; ++index) {
@@ -153,10 +184,26 @@ public:
             }
         }
         quota_ = std::make_unique<kvquota::Controller>(
-            memory_, sram_, bailu_, host_, options.scenario, [this](uint32_t region, size_t bytes) {
+            memory_, sram_, bailu_, host_, options.scenario,
+            [this](uint32_t region, size_t bytes) {
                 return allocate(region, bytes);
-            }
+            },
+            fabric_
         );
+        for (uint32_t slot = 0; slot < kSlots; ++slot) {
+            auto &a = slots_[slot];
+            a.async_state = allocate(sram_[a.home], 512);
+            a.activation_tx = allocate(host_[a.home / 8], 128);
+            a.activation_rx = allocate(sram_[a.home], 128);
+            a.retire_tx = allocate(sram_[a.home], 128);
+            a.retire_rx = allocate(host_[a.home / 8], 128);
+            for (auto &h : a.dirty)
+                h = allocate(sram_[a.home], 128);
+        }
+        background_host_ = allocate(host_[0], 1024);
+        background_bailu_[0] = allocate(bailu_[0], 1024);
+        background_bailu_[1] = allocate(bailu_[0], 1024);
+        memory_.stage_host(background_host_, pack(uint64_t{731}, 1024));
         for (uint32_t slot = 0; slot < options.slots; ++slot)
             bind(slot, 11 + 7 * slot, options.tokens);
         snapshot_usage();
@@ -171,16 +218,19 @@ public:
             quota_->receive();
             quota_->device_step();
             for (uint32_t core = 0; core < 16; ++core)
-                receive(core);
+                receive(core, true);
             for (uint32_t core = 0; core < 16; ++core)
-                service(core);
-            for (uint32_t slot = 0; slot < options_.slots; ++slot)
-                step(slot);
+                if (!fabric_.engine().core_blocked(core)) receive(core);
+            for (uint32_t core = 0; core < 16; ++core)
+                if (!fabric_.engine().core_blocked(core)) service(core);
+            drive_async();
+            step_requests();
             host_consume_outputs();
             quota_->host_step();
             if (fabric_.idle() && quota_->blocked_without_progress())
                 throw std::runtime_error("KV quota wait has no runnable page owner in this closed trace");
-            if (options_.reuse && !rebound && slots_[0].state.phase == Phase::Done) {
+            if (options_.reuse && !rebound && !slots_[0].host_busy &&
+                (slots_[0].state.phase == Phase::Done || options_.scenario == "hw_cancel_import")) {
                 bind(0, 97, 2);
                 rebound = true;
             }
@@ -198,7 +248,13 @@ public:
             }
             fabric_.advance_tick();
         }
-        throw std::runtime_error("static plan failed to drain within logical step bound");
+        std::ostringstream pending;
+        for (uint32_t slot = 0; slot < options_.slots; ++slot)
+            pending << " slot=" << slot << ":phase=" << static_cast<uint32_t>(slots_[slot].state.phase)
+                    << ",pos=" << slots_[slot].state.position << ",emitted=" << slots_[slot].state.emitted;
+        throw std::runtime_error(
+            "static plan failed to drain within logical step bound:" + pending.str() + fabric_.engine().pending()
+        );
     }
     void negative(const std::string &scenario) {
         if (scenario == "context_overflow") bind(0, 11, kContext);
@@ -235,13 +291,14 @@ public:
             accept_result(0, {key, 1, s.home, 0, ExpertResult, 0, s.banks[0].result[0]});
         } else if (scenario == "overwrite_inflight" || scenario == "premature_reclaim") {
             auto &s = slots_[0];
-            memory_.write_local(s.home, s.store, pack(uint64_t{7}, kPacketBytes));
+            memory_.write_local(s.home, s.dirty[0], pack(uint64_t{7}, kPacketBytes));
             require(
-                fabric_.send({identity(0, 0), s.home, s.home, 0, Store, s.store, s.banks[0].result[0]}),
+                fabric_.send({identity(0, 0), s.home, s.home, 0, Store, s.dirty[0], s.banks[0].result[0]}),
                 "test send rejected"
             );
-            if (scenario == "overwrite_inflight") memory_.write_local(s.home, s.store, pack(uint64_t{9}, kPacketBytes));
-            else memory_.release(s.store);
+            if (scenario == "overwrite_inflight")
+                memory_.write_local(s.home, s.dirty[0], pack(uint64_t{9}, kPacketBytes));
+            else memory_.release(s.dirty[0]);
         } else throw std::runtime_error("unknown negative scenario");
         throw std::runtime_error("negative scenario unexpectedly succeeded");
     }
@@ -249,7 +306,7 @@ public:
 private:
     Options options_;
     wp::Memory memory_;
-    wp::Fabric fabric_;
+    hw::Fabric fabric_;
     std::unique_ptr<kvquota::Controller> quota_;
     std::array<uint32_t, 16> sram_{};
     std::array<uint32_t, 2> bailu_{}, host_{};
@@ -259,6 +316,11 @@ private:
     uint32_t independent_peers_ = 0;
     uint64_t allocations_ = 0, binds_ = 0, token_count_ = 0, last_use_holds_ = 0, queue_stalls_ = 0;
     std::vector<std::string> outputs_;
+    wp::Handle background_host_ = 0;
+    std::array<wp::Handle, 2> background_bailu_{};
+    bool background_sent_ = false;
+    bool import_cancelled_ = false;
+    std::array<uint32_t, 16> core_cursor_{};
     struct AllocationRecord {
         uint64_t handle, region, offset, bytes, charged_bytes;
     };
@@ -268,6 +330,7 @@ private:
         require(!sealed_, "physical allocation after launch");
         const auto offset = memory_.regions().at(region).used;
         const auto handle = memory_.allocate(region, bytes);
+        fabric_.engine().register_buffer(handle);
         ++allocations_;
         allocation_records_.push_back({handle, region, offset, bytes, (bytes + 127) / 128 * 128});
         return handle;
@@ -282,25 +345,51 @@ private:
     void save(uint32_t slot) {
         auto &s = slots_[slot];
         memory_.write_local(s.home, s.control, pack(s.state));
+        AsyncImage image;
+        image.generation = s.state.generation;
+        image.hot = s.hot;
+        image.hot_position = s.hot_position;
+        image.flags = s.retire_sent;
+        for (uint32_t index = 0; index < 4; ++index) {
+            const auto &d = s.dirty_entries[index];
+            const auto &o = s.output_entries[index];
+            image.dirty[index] = {
+                d.key.generation,
+                0,
+                d.key.position,
+                d.key.layer,
+                static_cast<uint32_t>(d.live) | (static_cast<uint32_t>(d.sent) << 1),
+                0
+            };
+            image.output[index] = {
+                o.frame.generation,
+                o.frame.hidden,
+                o.frame.position,
+                o.frame.layer,
+                static_cast<uint32_t>(o.live) | (static_cast<uint32_t>(o.sent) << 1),
+                0
+            };
+        }
+        memory_.write_local(s.home, s.async_state, pack(image, 512));
     }
     void bind(uint32_t slot, uint64_t initial, uint32_t tokens) {
         require(slot < options_.slots && tokens > 0 && tokens + 1 <= kContext, "context exceeds static profile");
-        auto &s = slots_[slot];
-        require(s.state.phase == Phase::Idle || s.state.phase == Phase::Done, "request slot still busy");
-        require(!fabric_.outstanding(slot, s.state.generation) && !s.output_held, "rebind before drain");
-        auto generation = s.state.generation + 1;
-        quota_->bind(slot, generation);
-        s.state = {};
-        s.state.generation = generation;
-        s.state.position = 1;
-        s.state.requested = tokens;
-        s.state.cancel_after = options_.cancel && slot == 1 ? 2 : 0;
-        s.state.phase = Phase::ImportSend;
-        s.initial = initial;
-        memory_.stage_host(s.host_seed, pack(initial, kPacketBytes));
+        auto &a = slots_[slot];
+        require(!a.host_busy, "request slot still busy");
+        require(!fabric_.outstanding(slot, a.host_generation), "rebind before drain");
+        ++a.host_generation;
+        a.host_busy = true;
+        a.activation_pending = true;
+        a.retire_seen = a.retire_sent = false;
+        a.host_next = 1;
+        a.initial = initial;
+        quota_->bind(slot, a.host_generation);
+        memory_.stage_host(
+            a.activation_tx,
+            pack(Binding{a.host_generation, initial, tokens, options_.cancel && slot == 1 ? 2u : 0u}, 128)
+        );
         ++binds_;
-        fabric_.record("HOST_BIND", s.home, identity(slot, 0));
-        save(slot);
+        fabric_.record("HOST_BIND", a.home, {slot, a.host_generation, 0, 0, 0, 0});
     }
     void snapshot_usage() {
         for (const auto &region : memory_.regions())
@@ -331,29 +420,62 @@ private:
         f.bitmap |= 1u << lane;
         save(slot);
     }
-    void receive(uint32_t core) {
-        if (!fabric_.has_message(core)) return;
-        auto m = fabric_.receive(core);
+    void receive(uint32_t core, bool host = false) {
+        if (!(host ? fabric_.has_host_message(core) : fabric_.has_message(core))) return;
+        auto m = host ? fabric_.receive_host(core) : fabric_.receive(core);
         require(m.key.slot < options_.slots, "message slot outside profile");
         auto &s = slots_[m.key.slot];
         auto &f = s.state;
+        if (m.kind == Import) {
+            const auto b = unpack<Binding>(memory_.read_local(core, s.activation_rx));
+            require(b.generation > f.generation && b.tokens + 1 <= kContext, "activation identity or capacity invalid");
+            f = {};
+            f.generation = b.generation;
+            f.hidden = b.initial;
+            f.requested = b.tokens;
+            f.cancel_after = b.cancel_after;
+            f.position = 1;
+            f.phase = Phase::ImportWait;
+            s.hot = 0;
+            s.hot_position = 0;
+            fabric_.record("ACTIVATION_INSTALLED", core, m.key);
+            save(m.key.slot);
+            return;
+        }
+        if (m.kind == Retire) {
+            require(
+                unpack<uint64_t>(memory_.inspect_after_drain(s.retire_rx)) == s.host_generation, "stale retire notice"
+            );
+            s.retire_seen = true;
+            fabric_.record("REQUEST_DRAINED_DELIVERED", core, m.key);
+            return;
+        }
+        if (m.kind == Store || m.kind == Output || m.kind == OutputAck) {
+            require(m.key.generation == f.generation && m.key.lane < 4, "stale asynchronous completion");
+            if (m.kind == Store) {
+                auto &e = s.dirty_entries[m.key.lane];
+                require(e.live && e.key.position == m.key.position, "stale KV writeback");
+                e.live = false;
+                fabric_.record("KV_BAILU_COMMITTED", core, m.key);
+            } else if (m.kind == Output) {
+                auto &e = s.output_entries[m.key.lane];
+                require(e.live && e.frame.position == m.key.position, "stale output completion");
+                e.ready = true;
+                fabric_.record("OUTPUT_REGION_READY", core, m.key);
+            } else {
+                auto &e = s.output_entries[m.key.lane];
+                require(e.live && e.frame.position == m.key.position, "stale output credit");
+                e.live = false;
+                fabric_.record("OUTPUT_CREDIT_RETURNED", core, m.key);
+            }
+            return;
+        }
         require(
             m.key.generation == f.generation && m.key.position == f.position && m.key.layer == f.layer,
             "stale completion identity"
         );
-        if (m.kind == Import) f.import_ready |= 1;
-        else if (m.kind == ImportKV) f.import_ready |= 2;
-        else if (m.kind == Fetch) f.fetch_ready = 1;
-        else if (m.kind == Store) f.store_ready = 1;
-        else if (m.kind == Output) {
-            require(!s.output_held, "overwrite unacknowledged output");
-            s.output_held = !options_.silent;
-            f.output_ready = 1;
-            fabric_.record("OUTPUT_REGION_READY", core, m.key);
-        } else if (m.kind == OutputAck) {
-            require(unpack<uint64_t>(memory_.read_local(s.home, s.ack)) == f.generation, "stale Host ack");
-            f.output_ready = 2;
-        } else if (m.kind == ExpertResult) accept_result(m.key.slot, m);
+        if (m.kind == Fetch) f.fetch_ready = 1;
+        else if (m.kind == ExpertResult) accept_result(m.key.slot, m);
         else if (m.kind == ExpertInput) {
             require(m.expert <= kExperts && m.key.lane < kLanes, "invalid expert identity");
             auto &bank = s.banks[f.layer % kBanks];
@@ -397,6 +519,7 @@ private:
                             e.state.state = 4;
                     } else if (!memory_.in_use(e.output) && !memory_.in_use(bank.result[e.state.lane])) {
                         e.state.state = 0;
+                        fabric_.engine().release_payload(e.input, key);
                         fabric_.record("EXPERT_BUFFER_FREE", core, key);
                     }
                     memory_.write_local(core, e.control, pack(e.state));
@@ -411,6 +534,22 @@ private:
                 if (e.state.state) return false;
         return true;
     }
+    void step_requests() {
+        for (uint32_t core = 0; core < 16; ++core) {
+            if (fabric_.engine().core_blocked(core)) continue;
+            for (uint32_t offset = 0; offset < options_.slots; ++offset) {
+                const auto slot = (core_cursor_[core] + offset) % options_.slots;
+                if (slots_[slot].home != core) continue;
+                const auto &f = slots_[slot].state;
+                const auto before = std::make_tuple(f.phase, f.position, f.layer, f.emitted, f.sent, f.bitmap);
+                step(slot);
+                if (before != std::make_tuple(f.phase, f.position, f.layer, f.emitted, f.sent, f.bitmap)) {
+                    core_cursor_[core] = (slot + 1) % options_.slots;
+                    break;
+                }
+            }
+        }
+    }
     void step(uint32_t slot) {
         auto &s = slots_[slot];
         s.state = unpack<Frame>(memory_.read_local(s.home, s.control));
@@ -418,22 +557,8 @@ private:
         auto &bank = s.banks[f.layer % kBanks];
         if (!quota_->allow_data(slot)) return;
         switch (f.phase) {
-        case Phase::ImportSend:
-            if (!quota_->ready(slot)) break;
-            if (send({identity(slot, 0), s.home, s.home, 0, Import, s.host_seed, s.seed})) f.phase = Phase::ImportWait;
-            break;
         case Phase::ImportWait:
-            if (f.import_ready == 1 && !f.sent) {
-                if (send(
-                        {identity(slot, 0), s.home, s.home, 0, ImportKV, quota_->initial_source(slot),
-                         quota_->page(slot, 0)}
-                    ))
-                    f.sent = 1;
-            }
-            if (f.import_ready == 3) {
-                f.hidden = unpack<uint64_t>(memory_.read_local(s.home, s.seed));
-                f.phase = Phase::FetchSend;
-            }
+            if (quota_->ready_for(slot, f.generation)) f.phase = Phase::FetchSend;
             break;
         case Phase::FetchSend:
             if (!quota_->claim(slot, f.position, f.position < f.requested)) {
@@ -444,8 +569,18 @@ private:
                 }
                 break;
             }
-            if (send({identity(slot, 0), s.home, s.home, 0, Fetch, quota_->page(slot, f.position - 1), s.fetch}))
-                f.phase = Phase::FetchWait;
+            if (s.hot && s.hot_position == f.position - 1) {
+                f.hidden = (f.hidden + unpack<uint64_t>(memory_.read_local(s.home, s.hot))) % kModulus;
+                fabric_.record("KV_LOCAL_HIT", s.home, identity(slot, 0));
+                f.phase = Phase::Compute;
+            } else {
+                auto message = wp::Message{
+                    identity(slot, 0), s.home, s.home, 0, Fetch, quota_->page(slot, f.position - 1), s.fetch
+                };
+                bool accepted = options_.scenario == "hw_direct_blocking" && slot == 0 ? fabric_.send_direct(message) :
+                                                                                         send(message);
+                if (accepted) f.phase = Phase::FetchWait;
+            }
             break;
         case Phase::FetchWait:
             if (f.fetch_ready) {
@@ -460,6 +595,7 @@ private:
             }
             break;
         case Phase::Compute:
+            fabric_.record("CORE_COMPUTE_TILE", s.home, identity(slot, 0));
             f.input = (f.hidden * 3 + f.position + f.layer) % kModulus;
             for (uint32_t lane = 0; lane < kLanes; ++lane) {
                 f.routes[lane] = lane == 6 ? kExperts : (options_.hotspot ? lane : (f.input + f.layer + lane) % 8);
@@ -474,19 +610,21 @@ private:
             else {
                 auto lane = f.sent, expert = f.routes[lane];
                 auto &e = bank.expert[expert];
-                if (e.state.state == 0 && send(
-                                              {identity(slot, lane), s.home, expert_owner(s, expert), expert,
-                                               ExpertInput, bank.send[lane], e.input}
-                                          ))
+                if (send(
+                        {identity(slot, lane), s.home, expert_owner(s, expert), expert, ExpertInput, bank.send[lane],
+                         e.input}
+                    ))
                     ++f.sent;
             }
             break;
         case Phase::Results:
-            if (f.bitmap == (1u << kLanes) - 1 && services_idle(slot)) {
+            if (f.bitmap == (1u << kLanes) - 1) {
                 uint64_t sum = f.input;
                 for (uint32_t lane = 0; lane < kLanes; ++lane)
                     sum += (lane + 1) * unpack<uint64_t>(memory_.read_local(s.home, bank.result[lane]));
                 f.hidden = sum % kModulus;
+                for (uint32_t lane = 0; lane < kLanes; ++lane)
+                    fabric_.engine().release_payload(bank.result[lane], identity(slot, lane));
                 fabric_.record("LAYER_DONE", s.home, identity(slot, 0), f.hidden);
                 quota_->layer_done(slot);
                 if (options_.independent && independent_gate_ && !independent_release_) {
@@ -498,66 +636,22 @@ private:
                 }
                 if (++f.layer < kLayers) f.phase = Phase::Compute;
                 else {
-                    memory_.write_local(s.home, s.store, pack(f.hidden, kPacketBytes));
                     f.phase = Phase::StoreSend;
                 }
             }
             break;
         case Phase::StoreSend:
-            if (send({identity(slot, 0), s.home, s.home, 0, Store, s.store, quota_->page(slot, f.position)}))
-                f.phase = Phase::StoreWait;
-            break;
-        case Phase::StoreWait:
-            if (f.store_ready) {
-                f.store_ready = 0;
-                const auto output = options_.silent ? s.deferred_output.at(f.emitted) : s.output;
-                memory_.write_local(s.home, output, pack(f.hidden % 97, kPacketBytes));
-                f.phase = Phase::OutputSend;
-            }
-            break;
-        case Phase::OutputSend:
-            require(!s.output_held, "output buffer still owned by Host");
-            if (send(
-                    {identity(slot, 0), s.home, s.home, 0, Output,
-                     options_.silent ? s.deferred_output.at(f.emitted) : s.output,
-                     options_.silent ? s.deferred_host_output.at(f.emitted) : s.host_output}
-                ))
-                f.phase = Phase::OutputWait;
-            break;
-        case Phase::OutputWait:
-            if (options_.silent) {
-                if (f.output_ready == 1 && !fabric_.outstanding(slot, f.generation)) {
-                    s.deferred_state.at(f.emitted) = f;
-                    fabric_.record("TOKEN_PRODUCED_WITHOUT_HOST_ACK", s.home, identity(slot, 0));
-                    fabric_.record("LOCAL_TOKEN_FEEDBACK", s.home, identity(slot, 0));
-                    ++f.emitted;
-                    f.output_ready = 0;
-                    if (f.emitted == f.requested) f.phase = Phase::DrainOutputs;
-                    else {
-                        ++f.position;
-                        f.layer = 0;
-                        f.hidden %= 97;
-                        f.phase = Phase::FetchSend;
-                    }
-                }
-                break;
-            }
-            if (f.output_ready != 2 || fabric_.outstanding(slot, f.generation) || !services_idle(slot)) break;
-            finish_output(slot);
-            break;
-        case Phase::DrainOutputs:
-            if (f.output_ready == 2 && !fabric_.outstanding(slot, f.generation) && services_idle(slot)) {
-                s.output_held = false;
-                quota_->begin_retire(slot);
-                f.phase = Phase::RequestRetire;
-            }
+            publish_token(slot);
             break;
         case Phase::RequestRetire:
-            if (!fabric_.outstanding(slot, f.generation) && services_idle(slot) && !s.output_held &&
-                quota_->retire(slot)) {
-                f.phase = Phase::Done;
-                ++s.completed;
-                fabric_.record("REQUEST_DRAINED", s.home, identity(slot, 0));
+            if (async_idle(slot) && !fabric_.outstanding(slot, f.generation) && services_idle(slot)) {
+                if (!s.retire_sent) {
+                    memory_.write_local(s.home, s.retire_tx, pack(f.generation, 128));
+                    if (send({identity(slot, 0), s.home, s.home, 0, Retire, s.retire_tx, s.retire_rx})) {
+                        s.retire_sent = true;
+                        fabric_.record("DEVICE_DATA_DRAINED_SENT", s.home, identity(slot, 0));
+                    }
+                } else f.phase = Phase::Done;
             }
             break;
         case Phase::Idle:
@@ -566,75 +660,152 @@ private:
         }
         save(slot);
     }
-    void finish_output(uint32_t slot) {
+    bool async_idle(uint32_t slot) const {
+        const auto &s = slots_[slot];
+        return std::none_of(
+                   s.dirty_entries.begin(), s.dirty_entries.end(),
+                   [](const auto &e) {
+                       return e.live;
+                   }
+               ) &&
+               std::none_of(s.output_entries.begin(), s.output_entries.end(), [](const auto &e) {
+                   return e.live;
+               });
+    }
+    void publish_token(uint32_t slot) {
         auto &s = slots_[slot];
         auto &f = s.state;
-        require(
-            !s.output_held && !fabric_.outstanding(slot, f.generation) && services_idle(slot), "output before drain"
-        );
-        const auto token = f.hidden % 97;
-        fabric_.record("LOCAL_TOKEN_FEEDBACK", s.home, identity(slot, 0));
+        const auto index = (f.position - 1) % 4;
+        if (s.dirty_entries[index].live || memory_.in_use(s.dirty[index])) {
+            if (!s.dirty_blocked) fabric_.record("DIRTY_RING_BLOCKED", s.home, identity(slot, index));
+            s.dirty_blocked = true;
+            return;
+        }
+        if (s.output_entries[index].live) {
+            if (!s.output_blocked) fabric_.record("OUTPUT_RING_BLOCKED", s.home, identity(slot, index));
+            s.output_blocked = true;
+            return;
+        }
+        memory_.write_local(s.home, s.dirty[index], pack(f.hidden, 128));
+        memory_.write_local(s.home, s.deferred_output[index], pack(f.hidden % 97, 128));
+        s.dirty_entries[index] = {identity(slot, index), true, false};
+        s.output_entries[index] = {f, true, false, false};
+        s.hot = s.dirty[index];
+        s.hot_position = f.position;
+        fabric_.record("KV_RESIDENT_COMMITTED", s.home, identity(slot, index));
+        fabric_.record("LOCAL_TOKEN_FEEDBACK", s.home, identity(slot, index));
+        if (options_.silent) fabric_.record("TOKEN_PRODUCED_WITHOUT_HOST_ACK", s.home, identity(slot, index));
         ++f.emitted;
-        s.output_held = false;
-        f.output_ready = 0;
         if (f.emitted == f.requested || (f.cancel_after && f.emitted == f.cancel_after)) {
-            if (f.cancel_after && f.emitted < f.requested)
-                fabric_.record("TOKEN_BOUNDARY_CANCEL", s.home, identity(slot, 0));
+            if (f.emitted < f.requested) fabric_.record("TOKEN_BOUNDARY_CANCEL", s.home, identity(slot, index));
             quota_->begin_retire(slot);
             f.phase = Phase::RequestRetire;
         } else {
             ++f.position;
             f.layer = 0;
-            f.hidden = token;
+            f.hidden %= 97;
             f.phase = Phase::FetchSend;
+        }
+    }
+    void drive_async() {
+        const bool cancel = options_.scenario == "hw_cancel_import" || options_.scenario == "hw_rebind_during_import" ||
+                            options_.scenario == "hw_reclaim_during_import";
+        if (cancel && !import_cancelled_ && quota_->importing(0)) {
+            quota_->cancel_import(0);
+            slots_[0].activation_pending = false;
+            import_cancelled_ = true;
+            fabric_.record("HOST_CANCEL_IMPORT", 0, {0, slots_[0].host_generation});
+            if (options_.scenario == "hw_rebind_during_import") bind(0, 97, 2);
+            if (options_.scenario == "hw_reclaim_during_import") memory_.release(quota_->import_target(0));
+        }
+        if (cancel && import_cancelled_ && slots_[0].host_busy && slots_[0].host_generation == 1 &&
+            quota_->finished(0)) {
+            slots_[0].host_busy = false;
+            fabric_.record("REQUEST_DRAINED", 0, {0, 1});
+        }
+        for (uint32_t slot = 0; slot < options_.slots; ++slot) {
+            auto &s = slots_[slot];
+            if (s.activation_pending && quota_->imported(slot)) {
+                if (send(
+                        {{slot, s.host_generation, 0, 0, 0, 0},
+                         s.home,
+                         s.home,
+                         0,
+                         Import,
+                         s.activation_tx,
+                         s.activation_rx}
+                    ))
+                    s.activation_pending = false;
+            }
+            for (uint32_t index = 0; index < 4; ++index) {
+                if (fabric_.engine().core_blocked(s.home)) break;
+                auto &d = s.dirty_entries[index];
+                if (d.live && !d.sent &&
+                    send({d.key, s.home, s.home, 0, Store, s.dirty[index], quota_->page(slot, d.key.position)}))
+                    d.sent = true;
+                auto &o = s.output_entries[index];
+                if (o.live && !o.sent) {
+                    wp::Identity key{slot, o.frame.generation, o.frame.position, o.frame.layer, 0, index};
+                    if (send({key, s.home, s.home, 0, Output, s.deferred_output[index], s.deferred_host_output[index]}))
+                        o.sent = true;
+                }
+            }
+            if (s.retire_seen && quota_->retire(slot)) {
+                s.retire_seen = false;
+                s.host_busy = false;
+                ++s.completed;
+                fabric_.record("REQUEST_DRAINED", s.home, {slot, s.host_generation, 0, 0, 0, 0});
+            }
+        }
+        if ((fabric_.engine().read_gate() || (options_.scenario == "hw_background_stream" && quota_->importing(0))) &&
+            !background_sent_) {
+            if (send(
+                    {{4, 1, 0, 0, 0, 0},
+                     0,
+                     0,
+                     0,
+                     BackgroundImport,
+                     background_host_,
+                     background_bailu_[background_bailu_[0] % 2 == quota_->import_target(0) % 2 ? 0 : 1]}
+                ))
+                background_sent_ = true;
         }
     }
     void host_consume_outputs() {
         for (uint32_t slot = 0; slot < options_.slots; ++slot) {
             auto &s = slots_[slot];
-            auto &f = s.state;
-            if (options_.silent) {
-                if (f.phase != Phase::DrainOutputs || s.output_held) continue;
-                memory_.stage_host(s.host_ack, pack(f.generation, kPacketBytes));
-                if (!send({identity(slot, 0), s.home, s.home, 0, OutputAck, s.host_ack, s.ack})) continue;
-                for (uint32_t index = 0; index < f.emitted; ++index) {
-                    const auto &produced = s.deferred_state[index];
-                    const auto token = unpack<uint64_t>(memory_.inspect_after_drain(s.deferred_host_output[index]));
-                    outputs_.push_back(
-                        "{\"slot\":" + std::to_string(slot) + ",\"generation\":" + std::to_string(produced.generation) +
-                        ",\"position\":" + std::to_string(produced.position) +
-                        ",\"initial\":" + std::to_string(s.initial) + ",\"token\":" + std::to_string(token) +
-                        ",\"hidden\":" + std::to_string(produced.hidden) + "}"
-                    );
-                    ++token_count_;
-                }
-                s.output_held = true;
-                fabric_.record("OUTPUT_ACK", s.home, identity(slot, 0));
-                continue;
-            }
-            if (!s.output_held || f.output_ready != 1) continue;
-            if (options_.output_pause && slot == 0 && slots_[1].state.phase != Phase::Done) {
-                if (!output_gate_) fabric_.record("OUTPUT_ACK_WITHHELD", s.home, identity(slot, 0));
+            const auto index = (s.host_next - 1) % 4;
+            auto &o = s.output_entries[index];
+            if (!o.live || !o.ready || o.frame.position != s.host_next) continue;
+            if (options_.silent && s.state.phase != Phase::RequestRetire && s.state.phase != Phase::Done) continue;
+            if (options_.scenario == "hw_output_pressure" && slot == 0 && !s.output_blocked) continue;
+            if (options_.output_pause && slot == 0 && slots_[1].host_busy) {
+                if (!output_gate_)
+                    fabric_.record("OUTPUT_ACK_WITHHELD", s.home, {slot, o.frame.generation, o.frame.position});
                 output_gate_ = true;
                 continue;
             }
-            memory_.stage_host(s.host_ack, pack(f.generation, kPacketBytes));
-            if (!send({identity(slot, 0), s.home, s.home, 0, OutputAck, s.host_ack, s.ack})) continue;
-            auto token = unpack<uint64_t>(memory_.inspect_after_drain(s.host_output));
-            std::string row = "{\"slot\":" + std::to_string(slot) + ",\"generation\":" + std::to_string(f.generation) +
-                              ",\"position\":" + std::to_string(f.position) +
-                              ",\"initial\":" + std::to_string(s.initial) + ",\"token\":" + std::to_string(token) +
-                              ",\"hidden\":" + std::to_string(f.hidden) + "}";
-            outputs_.push_back(row);
+            if (memory_.in_use(s.host_ack) || memory_.in_use(s.ack)) continue;
+            memory_.stage_host(s.host_ack, pack(o.frame.generation, 128));
+            wp::Identity key{slot, o.frame.generation, o.frame.position, o.frame.layer, 0, index};
+            if (!send({key, s.home, s.home, 0, OutputAck, s.host_ack, s.ack})) continue;
+            const auto token = unpack<uint64_t>(memory_.inspect_after_drain(s.deferred_host_output[index]));
+            outputs_.push_back(
+                "{\"slot\":" + std::to_string(slot) + ",\"generation\":" + std::to_string(o.frame.generation) +
+                ",\"position\":" + std::to_string(o.frame.position) + ",\"initial\":" + std::to_string(s.initial) +
+                ",\"token\":" + std::to_string(token) + ",\"hidden\":" + std::to_string(o.frame.hidden) + "}"
+            );
             ++token_count_;
-            s.output_held = false;
-            fabric_.record("OUTPUT_ACK", s.home, identity(slot, 0));
-            // ACK carries generation only; no token value returns from the Host.
+            ++s.host_next;
+            o.ready = false;
+            fabric_.record("OUTPUT_HOST_CONSUMED", s.home, key);
+            fabric_.record("OUTPUT_ACK", s.home, key);
         }
     }
     void report(const std::string &scenario, const std::filesystem::path &directory) const {
         std::filesystem::create_directories(directory);
         quota_->report(directory);
+        fabric_.engine().report(directory);
         std::ofstream out(directory / "results.json");
         out << "{\"scenario\":\"" << scenario << "\",\"deployment_digest\":\"" << deployment::digest
             << "\",\"launches\":1,\"binds\":" << binds_ << ",\"physical_allocations_before_launch\":" << allocations_
@@ -684,7 +855,7 @@ int main(int argc, char **argv) {
         options.hotspot = scenario == "hotspot";
         options.independent = scenario == "independent_progress";
         options.output_pause = scenario == "output_backpressure";
-        options.reuse = scenario == "slot_reuse" || scenario == "kv_stale_generation";
+        options.reuse = scenario == "slot_reuse" || scenario == "kv_stale_generation" || scenario == "hw_cancel_import";
         options.cancel = scenario == "token_boundary_cancel";
         options.silent = scenario == "host_silent_burst";
         if (scenario == "one_credit") options.credits = 1;
@@ -696,7 +867,8 @@ int main(int argc, char **argv) {
             options.tokens = kContext - 1;
             options.slots = 1;
         }
-        if (scenario == "kv_watermark_edge") options.tokens = 6;
+        if (scenario == "kv_watermark_edge" || scenario == "hw_dirty_pressure" || scenario == "hw_output_pressure")
+            options.tokens = 6;
         Probe probe(options);
         const std::array<std::string, 8> negatives = {"context_overflow",   "slot_busy",
                                                       "overwrite_inflight", "premature_reclaim",

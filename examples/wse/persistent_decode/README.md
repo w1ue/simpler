@@ -11,7 +11,8 @@ ordinary Worker/HBG path, a physical mesh, or chip performance.
 
 The [static-plan and KV-quota fixture](static_plan/README.md) separately checks
 preallocated resources, fixed AICore control flow, Host page renewal and
-draining over this backend's Memory/Fabric, with its own integer oracle.
+draining over actual WSE Memory and a bounded shared hardware-path model,
+with its own integer oracle.
 
 ## Run and inspect
 

@@ -1,12 +1,13 @@
 {
-  "format": "simpler.wse.program.v2",
-  "contract": "static_protocol_u64_kv_quota_v2",
+  "format": "simpler.wse.program.v3",
+  "contract": "static_protocol_u64_hardware_v3",
   "artifact": {
-    "kind": "cpu_cpp_source",
     "path": "static_plan_probe.cpp",
-    "sha256": "23e1b454b58bd667a1da2647721d853434479e749eb0669895ad5fcbe5e40756",
+    "kind": "cpu_cpp_source",
+    "sha256": "764d333ec58863ce9122b7791979b84000f1f1d31c29e07584f6a676363aa90d",
     "includes": {
-      "kv_quota.h": "ab18dcf2f7831ef6b1e7e4cb1f9dfeb3605984901a5700c6b4de327713b10c33"
+      "kv_quota.h": "3d176941edd25295d023fd744cd38129bec9ed08dba284ed76e9e99ee28b284f",
+      "hardware_transport.h": "560cb7f2d306010ba8fa805906339f2bb99e909fc81d04fcf9a0d5d3352e0fd6"
     }
   },
   "bounds": {
@@ -25,7 +26,9 @@
   "storage": {
     "alignment": 128,
     "packet_bytes": 128,
-    "request_frame_bytes": 104,
+    "request_frame_bytes": 88,
+    "async_frame_bytes": 512,
+    "background_bytes": 1024,
     "service_frame_bytes": 24,
     "batcher_control_allowance_bytes": 8192,
     "quota_frame_bytes": 256,
@@ -34,15 +37,23 @@
   "layout": {
     "per_slot_home": [
       "request_frame",
-      "seed",
       "fetch",
-      "store",
-      "output",
       "ack"
     ],
+    "per_slot_async": [
+      "state",
+      "activation_tx",
+      "activation_rx",
+      "retire_tx",
+      "retire_rx",
+      "dirty",
+      "output_ring"
+    ],
+    "per_background": [
+      "host_import",
+      "bailu_target"
+    ],
     "per_slot_host": [
-      "seed",
-      "output",
       "ack"
     ],
     "per_slot_output_cell": [
@@ -75,14 +86,23 @@
     ]
   },
   "protocol": {
-    "id": "static_protocol_memory_fabric_kv_quota_v2",
+    "id": "static_protocol_memory_hardware_v3",
     "kv_initial_u64": 5,
     "ready": "delivery_then_publication",
     "input_reuse": "last_use_then_related_transfer_retirement",
     "request_reuse": "outputs_and_transfers_and_services_drained",
-    "output_ack": "generation_only_local_token_feedback",
+    "output_ack": "bounded_ring_background_consumption",
     "kv_grant": "install_then_ack",
     "kv_low_watermark": "claimed_pages_includes_inflight",
-    "kv_control": "separate_bounded_fabric"
+    "kv_control": "shared_batcher_with_progress_reservation"
+  },
+  "hardware": {
+    "bailu_banks_per_chip": 2,
+    "batcher_actions_per_endpoint_tick": 1,
+    "core_payload_ports": 1,
+    "deterministic_scope": "within_chip",
+    "max_jobs": 4096,
+    "payload_handle_entries": 2048,
+    "dirty_entries_per_slot": 4
   }
 }

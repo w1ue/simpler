@@ -2,7 +2,7 @@
   "constraint": "No resident AICore runtime: fixed slots, direct control flow, all device allocations before launch",
   "evidence_layers": {
     "existing_decode": "Fresh-source scaled numerical fixture checked by its independent NumPy reference",
-    "static_plan": "Separate protocol workload reusing the actual WSE Memory/Fabric implementation"
+    "static_plan": "Separate protocol workload using actual WSE Memory with a bounded shared hardware-path model"
   },
   "positive_cases": ["baseline", "reverse", "one_credit", "small_queue", "hotspot", "independent_progress", "output_backpressure", "slot_reuse", "context_boundary", "token_boundary_cancel", "host_silent_burst"],
   "required_observations": ["all requests drain", "zero physical device allocate/release during service", "numerical agreement with independent protocol oracle", "every transfer delivered before publication and consumed exactly once", "generation advances only after drain", "no per-layer Host decision or token feedback", "fixed per-owner capacity respected"],

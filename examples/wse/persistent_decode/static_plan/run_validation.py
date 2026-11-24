@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from run_deployment_checks import run as run_deployment_checks
+from run_hardware_checks import run as run_hardware_checks
 from run_kv_quota_checks import run as run_kv_quota_checks
 from run_probe import run as run_probe
 
@@ -65,6 +66,7 @@ def main(source_root, compiler, build):
         here / "deployment.min.json", source_root, compiler, build / "deployment", output / "deployment_validation.json"
     )
     run_kv_quota_checks(source_root, compiler, build / "quota", output / "kv_quota_validation.json")
+    run_hardware_checks(source_root, compiler, build / "hardware", output / "hardware_validation.json")
     inputs = {source: source_root / source for source in sources}
     inputs |= {
         "examples/wse/persistent_decode/" + name: source_root / "examples/wse/persistent_decode" / name
@@ -85,10 +87,12 @@ def main(source_root, compiler, build):
             "run_deployment_checks.py",
             "kv_quota.h",
             "run_kv_quota_checks.py",
+            "hardware_transport.h",
+            "run_hardware_checks.py",
         )
     }
     evidence = {
-        "date": "2026-11-23",
+        "date": "2026-11-24",
         "compiler": subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0],
         "source_sha256": {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in inputs.items()},
         "numeric": {
@@ -100,6 +104,7 @@ def main(source_root, compiler, build):
         "protocol": "static_validation.json",
         "deployment": "deployment_validation.json",
         "kv_quota": "kv_quota_validation.json",
+        "hardware_paths": "hardware_validation.json",
         "not_verified": ["integrated full-model static codegen", "native WSE", "native batcher ABI", "hardware timing"],
     }
     (output / "evidence.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

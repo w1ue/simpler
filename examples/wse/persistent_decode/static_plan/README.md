@@ -1,7 +1,7 @@
 # Static decode plan and KV page quotas
 
-This standalone CPU protocol fixture links the current WSE `Memory/Fabric`
-backend. It models bounded generated AICore control flow, shared Bailu KV page
+This standalone CPU protocol fixture links the current WSE `Memory` backend
+and supplies a bounded hardware-path transport model. It models generated AICore control flow, shared Bailu KV page
 leases, Host renewal and draining without a generic resident AICore runtime.
 All simulated physical allocations exist before launch. The payload is integer
 arithmetic with an independent per-layer oracle, not full attention or model
@@ -36,19 +36,19 @@ by the parent fixture's `run.sh`.
 
 Summaries and source hashes go to `build/wse-static-plan/summary/`; detailed
 outputs, events, prepared layouts and build logs remain under the corresponding
-`numeric/`, `protocol/`, `deployment/` and `quota/` subdirectories. Running the
+`numeric/`, `protocol/`, `deployment/`, `quota/` and `hardware/` subdirectories. Running the
 suite does not update tracked source or input files.
 
 ## Deployment and execution
 
-`deployment.min.json` is the current v2 deployment contract. Its six top-level
-entries contain 19 required leaves. Unknown or duplicate keys are rejected.
-The manifest binds the main C++ source, quota header, fixed bounds, layout
+`deployment.min.json` is the current v3 deployment contract. Its seven top-level
+entries contain 26 required leaves. Unknown or duplicate keys are rejected.
+The manifest binds the main C++ source, quota and transport headers, fixed bounds, layout
 recipe and protocol; incompatible contracts are rejected rather than adapted.
 
 | Input | Effect |
 | ----- | ------ |
-| `format`, `program.manifest`, `program.sha256` | Select and verify the v2 program contract; artifact/header bytes are checked separately |
+| `format`, `program.manifest`, `program.sha256` | Select and verify the v3 program contract; artifact/header bytes are checked separately |
 | `placement.home_core_by_slot` | Four request homes; this backend supports Core 0 or 8 |
 | `placement.routed_expert_core` | Eight distinct routed-expert owners |
 | `placement.shared_expert_core_by_chip` | One shared expert on each home chip |
@@ -65,6 +65,13 @@ recipe and protocol; incompatible contracts are rejected rather than adapted.
 | `kv_quota.exhaustion_policy` | `wait` for released pages or `deny` renewal |
 | `kv_quota.control_inbox_entries_per_core` | Independently reserved control notification credits |
 | `kv_quota.control_queue_entries_per_endpoint` | Bounded control send queue |
+| `hardware.batcher_wait_entries` | Shared outstanding contexts per endpoint, including one reserved for control progress |
+| `hardware.noc_queue_entries` | Bounded Core push jobs per endpoint |
+| `hardware.direct_queue_entries` | Bounded direct Host-to-Bailu jobs |
+| `hardware.noc_latency_ticks` | Declared within-chip push latency after injection |
+| `hardware.external_latency_ticks` | Initial external-domain delay before shared service |
+| `hardware.bailu_bytes_per_tick` | Service quantum per Bailu bank |
+| `hardware.external_bytes_per_tick` | Service quantum per chip and link direction |
 
 `prepare_deployment.py` checks hashes, roles, budgets and quota constraints,
 then emits `prepared_deployment.json` and `deployment_config.h`. Configuration
@@ -75,8 +82,11 @@ The fixed program has two chips, eight Cores per chip, four request slots,
 40 layers, eight routed experts selected top-6 plus one shared expert, and two
 layer banks per slot. A request advances one layer at a time. Each chip owns
 a shared physical pool, while each request has a fixed 16-entry page table.
-Each cell is 128 bytes. Default deployment creates 524 allocations; the count
-is `460 + 2 * pool_pages_per_chip` and remains constant during execution.
+Each cell is 128 bytes. Default deployment creates 543 allocations; the count
+is `479 + 2 * pool_pages_per_chip` and remains constant during execution.
+Each slot has four dirty KV cells, four output cells, an 88-byte request frame
+and a 512-byte asynchronous state image. Background import uses a 1024-byte
+Host source and two alternate Bailu targets to select a contending bank.
 
 | Responsibility | Implementation |
 | -------------- | -------------- |
@@ -85,7 +95,7 @@ is `460 + 2 * pool_pages_per_chip` and remains constant during execution.
 | Host pool ledger, Low deduplication, Grant and ACK | `Controller::host_step()` |
 | Install grants, claim pages, report Low, pause/resume | `Controller::device_step()/claim()` |
 | Generated request/expert stages and local token feedback | `Probe::step()/service()` |
-| Ordered payload/control transfers and notification credits | Data/control instances of the existing `Fabric` |
+| Shared transport, resource arbitration and notification credits | Two `hw::Fabric` views of one `hw::Engine` |
 | Output consumption and request retirement | `host_consume_outputs()`, `RequestRetire`, `Controller::retire()` |
 
 ## Quota protocol and reclamation
@@ -101,8 +111,8 @@ with at most one Low per installed grant sequence. Claiming at the hard bound
 pauses only that request at `FetchSend`; it cannot access an ungranted page.
 Other request and service stages continue. A legal new grant rearms reporting.
 
-Low, Grant, Denied and ACK traverse a separately provisioned bounded control
-Fabric over the same Memory model. Epoch, slot, generation and sequence checks
+Low, Grant, Denied, Stop and ACK use bounded logical control queues over the
+same physical batcher budget as data. Epoch, slot, generation and sequence checks
 discard stale messages and make repeated grants/events idempotent. An identical
 duplicate grant may repeat its ACK; conflicting payloads are rejected.
 
@@ -115,13 +125,43 @@ recording `capacity_denied` rather than full-generation success.
 Retirement waits for data/control transfers, pending authorization ACKs, expert
 services and output responsibility to drain before returning every leased page,
 including unused pages. Allocations remain; a reused slot gets a new generation.
-Default output flow waits for Host ACK per token. `host_silent_burst` separately
-validates three generated tokens before the first output ACK using fixed cells.
+New KV remains readable in SRAM while immutable dirty snapshots write back.
+The next token proceeds without waiting for the previous writeback or Host ACK.
+Dirty and output rings each stop reuse at their own four-entry bound.
+`host_silent_burst` validates three generated tokens before the first output ACK.
+
+## Hardware paths and overlap
+
+Host-to-Bailu imports bypass batcher but share Host ingress and the destination
+Bailu bank. Initial history must be visible before the first usable Grant and
+activation. Host-to-SRAM, Bailu-to-SRAM and every D2H payload/control message
+use batcher. A waiting external transaction occupies a bounded context without
+holding the issue slot; data cannot occupy the reserved control context.
+
+Within-chip SRAM pushes use a prebound destination and payload credit. Receiver
+visibility takes the declared NoC latency after injection; consumption does not
+wait for a return credit. Credit is returned only after the actual consumer's
+resource is reusable. This is the one-way, 0.5 RTT semantic, not a measured wire
+latency. Cross-chip SRAM transfers use the external model and carry no such
+deterministic guarantee. A future destination SRAM port is reserved for each
+push; competing external writes defer. Local compute/read port costs are not modeled.
+
+An optional Core direct Bailu read blocks that Core until visible. Host handling
+and other Cores continue. `hw_contention` and `hw_direct_blocking` use the same
+read-release conditions: another Core finishes a layer, a post-gate Grant is
+visible, and a competing direct import finishes. Assertions compare peer compute
+on the blocked Core. Gates create controlled stalls; they do not represent a
+calibrated contention duration or predict TPOT.
+
+Import cancellation closes activation, then waits for direct DMA completion
+before page return and slot reuse. Generation checks alone cannot cancel a
+physical write. Rebinding or reclaiming a live import is rejected.
 
 ## Validation and scope
 
 The full driver runs 11 numerical/13 expected rejection cases, 11 static/8
-rejection cases, 5 deployment/30 rejection cases, and 13 quota/3 rejection cases.
+rejection cases, 6 deployment/35 rejection cases, 13 quota/3 rejection cases,
+and 9 hardware-path/2 rejection cases.
 Quota cases cover refill, inclusive watermark, delayed Host, delayed install,
 hard pause, duplicate Low/Grant, old grant sequence, stale generation/epoch,
 pool wait/recovery, capacity denial and bounded control congestion. Explicit
@@ -136,6 +176,9 @@ closed-trace deadlock, oversized grants and conflicting duplicate grants.
 This is a functional model. Admission and retirement use simulator function
 boundaries; the Host ledger and portions of fixed control state have CPU shadow
 objects. Independent control progress, device memory ordering and full metadata
-placement require hardware contracts. Native command/CQ ABI, automatic PyPTO
+placement require hardware contracts. The asynchronous device state has a fixed
+SRAM image, while transport jobs, Host ledgers and simulator shadows are CPU
+objects; the 8192-byte batcher allowance is not a proven native job layout.
+Native command/CQ ABI, automatic PyPTO
 lowering, full-model static execution, physical pool growth, profile migration,
 multi-owner atomic renewal and hardware timing are outside the verified scope.

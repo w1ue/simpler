@@ -237,6 +237,7 @@ def run(source_root, compiler, build, summary):
         for name in (
             "static_plan_probe.cpp",
             "kv_quota.h",
+            "hardware_transport.h",
             "prepare_deployment.py",
             "run_kv_quota_checks.py",
             "deployment.min.json",
@@ -250,7 +251,7 @@ def run(source_root, compiler, build, summary):
                 negative=negatives,
                 source_sha256=hashes,
                 hardware_execution=False,
-                scope="Fixed-pool quota and control-plane protocol over actual Memory/Fabric",
+                scope="Fixed-pool quota over actual Memory and a shared bounded hardware-path model",
             ),
             indent=2,
         )

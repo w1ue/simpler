@@ -10,6 +10,7 @@
  */
 #pragma once
 #include "device.h"
+#include "hardware_transport.h"
 #include <deployment_config.h>
 
 #include <algorithm>
@@ -24,10 +25,10 @@ namespace kvquota {
 namespace wp = wse::persistent;
 constexpr uint32_t Slots = 4, Chips = 2, MaxPages = 32, TablePages = 16, ControlBytes = 256;
 constexpr uint64_t Epoch = 1;
-enum Kind : uint32_t { Low = 100, Grant = 101, Ack = 102, Denied = 103 };
+enum Kind : uint32_t { Low = 100, Grant = 101, Ack = 102, Denied = 103, Stop = 104 };
 struct Packet {
     uint64_t epoch = Epoch, generation = 0, sequence = 0, event_sequence = 0;
-    uint32_t slot = 0, pool = 0, granted = 0, claimed = 0, kind = 0;
+    uint32_t slot = 0, pool = 0, granted = 0, claimed = 0, kind = 0, flags = 0;
     std::array<uint32_t, TablePages> pages{};
 };
 struct DeviceState {
@@ -72,13 +73,15 @@ class Controller {
         uint32_t count = 0;
         std::array<uint32_t, TablePages> pages{};
         bool active = false, initial = false, wants = false, pending_send = false, awaiting_ack = false;
-        bool waiting = false, host_gate_reported = false;
+        bool waiting = false, host_gate_reported = false, import_sent = false, import_done = false;
+        bool closing = false, capacity_stop = false;
+        bool cancel_import = false;
         Packet outgoing{}, last_grant{}, first_grant{};
     };
     struct Endpoint {
         std::array<bool, 2> low_ready{}, grant_ready{}, ack_ready{};
-        bool low_pending = false, ack_pending = false, install_gate_reported = false;
-        Packet low{}, ack{};
+        bool low_pending = false, ack_pending = false, install_gate_reported = false, stop_pending = false;
+        Packet low{}, ack{}, stop{};
     };
     struct Trace {
         uint64_t tick, generation, packet_generation, packet_epoch, sequence;
@@ -86,7 +89,7 @@ class Controller {
         uint32_t slot, granted, claimed, host_owned, free_pages, physical;
     };
     wp::Memory &memory_;
-    wp::Fabric control_;
+    hw::Fabric control_;
     std::array<std::array<Page, MaxPages>, Chips> pool_{};
     std::array<DeviceState, Slots> device_{};
     std::array<Host, Slots> host_{};
@@ -98,7 +101,7 @@ class Controller {
     struct Outcome {
         uint32_t slot;
         uint64_t generation;
-        bool capacity_stop;
+        bool capacity_stop, cancelled;
     };
     std::vector<Outcome> outcomes_;
     std::string scenario_;
@@ -119,10 +122,12 @@ class Controller {
     wp::Identity key(const Packet &p, uint32_t lane) const { return {p.slot, p.generation, 0, 0, p.kind, lane}; }
     void record(const char *event, uint32_t slot, const Packet *p = nullptr, uint32_t physical = UINT32_MAX) {
         const auto &d = device_[slot];
+        const auto generation = host_[slot].generation;
+        const bool installed = d.generation == generation;
         trace_.push_back(
-            {control_.tick(), d.generation, p ? p->generation : d.generation, p ? p->epoch : Epoch,
-             p ? p->sequence : d.sequence, event, slot, d.granted, d.claimed, host_[slot].count, free_pages(chip(slot)),
-             physical}
+            {control_.tick(), generation, p ? p->generation : generation, p ? p->epoch : Epoch,
+             p ? p->sequence : d.sequence, event, slot, installed ? d.granted : 0, installed ? d.claimed : 0,
+             host_[slot].count, free_pages(chip(slot)), physical}
         );
     }
     void save(uint32_t slot) { memory_.write_local(home(slot), buffers_[slot].state, bytes(device_[slot])); }
@@ -130,7 +135,7 @@ class Controller {
         auto &b = buffers_[p.slot];
         wp::Handle source = 0, destination = 0;
         auto &e = endpoint_[p.slot];
-        if (p.kind == Low) {
+        if (p.kind == Low || p.kind == Stop) {
             source = b.low_tx[lane];
             destination = b.low_rx[lane];
             if (e.low_ready[lane]) return false;
@@ -144,7 +149,7 @@ class Controller {
             if (e.grant_ready[lane]) return false;
         }
         if (memory_.in_use(source) || memory_.in_use(destination)) return false;
-        if (p.kind == Low || p.kind == Ack) memory_.write_local(home(p.slot), source, bytes(p));
+        if (p.kind == Low || p.kind == Stop || p.kind == Ack) memory_.write_local(home(p.slot), source, bytes(p));
         else memory_.stage_host(source, bytes(p));
         if (!control_.send({key(p, lane), home(p.slot), home(p.slot), 0, p.kind, source, destination})) {
             ++control_stalls_;
@@ -211,6 +216,14 @@ class Controller {
             record("KV_STALE_EVENT_DROPPED", slot, &p);
             return;
         }
+        if (p.kind == Stop) {
+            h.closing = true;
+            h.capacity_stop = p.flags != 0;
+            h.wants = false;
+            h.initial = false;
+            record("KV_HOST_STOPPED", slot, &p);
+            return;
+        }
         require(p.slot == slot && p.kind == Low && p.sequence <= h.sequence, "low-water routing or sequence invalid");
         require(p.pool == chip(slot) && p.claimed <= p.granted, "invalid low-water counters");
         if (p.event_sequence <= h.last_event || p.sequence < h.acked) {
@@ -219,7 +232,7 @@ class Controller {
             return;
         }
         h.last_event = p.event_sequence;
-        if (!device_[slot].ending) h.wants = true;
+        if (!h.closing) h.wants = true;
         record("KV_LOW_HOST_RECEIVED", slot, &p);
     }
     void process_ack(uint32_t slot, uint32_t lane) {
@@ -239,6 +252,12 @@ class Controller {
         auto &d = device_[slot];
         auto &e = endpoint_[slot];
         const auto p = value<Packet>(memory_.read_local(home(slot), buffers_[slot].grant_rx[lane]));
+        if (p.epoch == Epoch && p.kind == Grant && p.sequence == 1 && p.generation > d.generation &&
+            (!d.granted || d.ending)) {
+            d = {};
+            d.generation = p.generation;
+            record("KV_BIND", slot, &p);
+        }
         if (p.epoch != Epoch || p.generation != d.generation) {
             e.grant_ready[lane] = false;
             ++stale_grant_count_;
@@ -350,10 +369,10 @@ public:
     template <typename Allocate>
     Controller(
         wp::Memory &memory, const std::array<uint32_t, 16> &sram, const std::array<uint32_t, 2> &bailu,
-        const std::array<uint32_t, 2> &host, std::string scenario, Allocate allocate
+        const std::array<uint32_t, 2> &host, std::string scenario, Allocate allocate, hw::Fabric &fabric
     ) :
         memory_(memory),
-        control_(memory, 16, 8, deployment::quota_control_inbox, deployment::quota_control_queue),
+        control_(fabric, true),
         scenario_(std::move(scenario)) {
         for (uint32_t chip = 0; chip < Chips; ++chip)
             for (uint32_t page = 0; page < deployment::quota_pool_pages; ++page)
@@ -375,18 +394,13 @@ public:
     }
     void bind(uint32_t slot, uint64_t generation) {
         require(!host_[slot].active, "quota slot rebound before lease return");
-        device_[slot] = {};
-        device_[slot].generation = generation;
         host_[slot] = {};
         host_[slot].generation = generation;
         host_[slot].active = true;
         host_[slot].initial = true;
-        endpoint_[slot] = {};
         finished_[slot] = false;
         layers_[slot] = 0;
         memory_.stage_host(buffers_[slot].initial, bytes(uint64_t{5}, 128));
-        save(slot);
-        record("KV_BIND", slot);
     }
     wp::Handle initial_source(uint32_t slot) const { return buffers_[slot].initial; }
     wp::Handle page(uint32_t slot, uint32_t logical) const {
@@ -394,7 +408,24 @@ public:
         require(logical < d.claimed && logical < d.granted, "KV access outside installed grant");
         return pool_[chip(slot)][d.pages[logical]].handle;
     }
+    wp::Handle import_target(uint32_t slot) const {
+        const auto &h = host_[slot];
+        require(h.count > 0, "import before initial page reservation");
+        return pool_[chip(slot)][h.pages[0]].handle;
+    }
+    bool imported(uint32_t slot) const { return host_[slot].import_done; }
+    bool importing(uint32_t slot) const { return host_[slot].import_sent && host_[slot].initial; }
+    bool finished(uint32_t slot) const { return finished_[slot]; }
+    void cancel_import(uint32_t slot) {
+        auto &h = host_[slot];
+        require(h.active && h.initial && h.import_sent && !h.pending_send, "cancel after activation submission");
+        h.cancel_import = true;
+        record("KV_IMPORT_CANCEL_REQUESTED", slot);
+    }
     bool ready(uint32_t slot) const { return device_[slot].granted != 0; }
+    bool ready_for(uint32_t slot, uint64_t generation) const {
+        return ready(slot) && device_[slot].generation == generation && !device_[slot].ending;
+    }
     bool allow_data(uint32_t slot) const {
         bool delayed = scenario_ == "kv_delayed_host" || scenario_ == "kv_delayed_install";
         return !(delayed && slot == 2 && !device_[0].paused && layers_[2] == 0);
@@ -432,9 +463,15 @@ public:
         if (!device_[slot].ending) {
             device_[slot].ending = 1;
             device_[slot].capacity_stop = capacity_stop;
-            host_[slot].wants = false;
-            host_[slot].initial = false;
             endpoint_[slot].low_pending = false;
+            auto &e = endpoint_[slot];
+            e.stop = {};
+            e.stop.kind = Stop;
+            e.stop.slot = slot;
+            e.stop.generation = device_[slot].generation;
+            e.stop.pool = chip(slot);
+            e.stop.flags = capacity_stop ? 1 : 0;
+            e.stop_pending = true;
             record("KV_RETIRE_BEGIN", slot);
             save(slot);
         }
@@ -442,6 +479,7 @@ public:
     bool retire(uint32_t slot) {
         auto &h = host_[slot];
         auto &e = endpoint_[slot];
+        if (!h.closing || e.stop_pending) return false;
         if (control_.outstanding(slot, h.generation) || h.pending_send || h.awaiting_ack || e.ack_pending) return false;
         for (uint32_t lane = 0; lane < 2; ++lane)
             if (e.low_ready[lane] || e.grant_ready[lane] || e.ack_ready[lane]) return false;
@@ -457,7 +495,7 @@ public:
             ++released_;
         }
         record("KV_PAGES_RETURNED", slot);
-        outcomes_.push_back({slot, h.generation, device_[slot].capacity_stop != 0});
+        outcomes_.push_back({slot, h.generation, h.capacity_stop, h.cancel_import});
         h.count = 0;
         h.active = false;
         h.waiting = false;
@@ -466,11 +504,12 @@ public:
     }
     void receive() {
         for (uint32_t core = 0; core < 16; ++core) {
-            if (!control_.has_message(core)) continue;
-            const auto m = control_.receive(core);
+            const bool host = control_.has_host_message(core);
+            if (!host && !control_.has_message(core)) continue;
+            const auto m = host ? control_.receive_host(core) : control_.receive(core);
             require(m.key.slot < Slots && m.key.lane < 2, "quota control address invalid");
             auto &e = endpoint_[m.key.slot];
-            if (m.kind == Low) e.low_ready[m.key.lane] = true;
+            if (m.kind == Low || m.kind == Stop) e.low_ready[m.key.lane] = true;
             else if (m.kind == Ack) e.ack_ready[m.key.lane] = true;
             else if (m.kind == Grant || m.kind == Denied) e.grant_ready[m.key.lane] = true;
             else throw std::runtime_error("unknown quota control message");
@@ -479,6 +518,7 @@ public:
     void device_step() {
         for (uint32_t slot = 0; slot < Slots; ++slot) {
             auto &e = endpoint_[slot];
+            if (control_.engine().core_blocked(home(slot))) continue;
             for (uint32_t lane = 0; lane < 2; ++lane)
                 if (e.grant_ready[lane]) install(slot, lane);
             if (e.low_pending && send_packet(e.low, 0)) {
@@ -490,12 +530,17 @@ public:
                 e.ack_pending = false;
                 record("KV_GRANT_ACK_SENT", slot, &e.ack);
             }
-            if (host_[slot].active) save(slot);
+            if (e.stop_pending && send_packet(e.stop, 0)) {
+                e.stop_pending = false;
+                record("KV_STOP_SENT", slot, &e.stop);
+            }
+            save(slot);
         }
     }
     void host_step() {
         for (uint32_t slot = 0; slot < Slots; ++slot) {
             auto &h = host_[slot];
+            if (scenario_ == "kv_conflicting_grant" && slot == 0 && h.sequence) continue;
             auto &d = device_[slot];
             auto &e = endpoint_[slot];
             for (uint32_t lane = 0; lane < 2; ++lane) {
@@ -503,7 +548,16 @@ public:
                 if (e.ack_ready[lane]) process_ack(slot, lane);
             }
             if (!h.active) continue;
-            if (!h.pending_send && !h.awaiting_ack && !d.ending && (h.initial || h.wants)) {
+            if (h.cancel_import) {
+                if (control_.engine().completed(import_target(slot))) {
+                    h.closing = true;
+                    h.initial = false;
+                    h.import_done = false;
+                    if (retire(slot)) record("KV_CANCELLED_IMPORT_DRAINED", slot);
+                }
+                continue;
+            }
+            if (!h.pending_send && !h.awaiting_ack && !h.closing && (h.initial || h.wants)) {
                 bool held = scenario_ == "kv_delayed_host" && slot == 0 && !h.initial && !host_gate_released_;
                 if (held) {
                     if (!h.host_gate_reported) {
@@ -521,6 +575,21 @@ public:
                                             deployment::quota_initial_pages :
                                             std::min<uint32_t>(TablePages, h.count + deployment::quota_refill_pages);
                     if (reserve(slot, target)) {
+                        if (h.initial && !h.import_sent) {
+                            if (control_.send(
+                                    {{slot, h.generation, 0, 0, 8, 0},
+                                     home(slot),
+                                     home(slot),
+                                     0,
+                                     8,
+                                     buffers_[slot].initial,
+                                     import_target(slot)}
+                                ))
+                                h.import_sent = true;
+                        }
+                        if (h.initial && (!h.import_sent || !control_.engine().completed(import_target(slot))))
+                            continue;
+                        h.import_done = true;
                         h.initial = false;
                         stage_grant(slot, false);
                     } else if (deployment::quota_deny_on_exhaustion && !h.initial) stage_grant(slot, true);
@@ -546,7 +615,7 @@ public:
         for (uint32_t slot = 0; slot < Slots; ++slot) {
             const auto &d = device_[slot];
             require(d.claimed <= d.granted && d.granted <= TablePages, "quota counter invariant violated");
-            if (!host_[slot].active) continue;
+            if (!host_[slot].active || d.generation != host_[slot].generation) continue;
             require(d.granted <= host_[slot].count, "device counted unreserved Host pages");
             for (uint32_t i = 0; i < d.granted; ++i) {
                 const auto &p = pool_[chip(slot)][d.pages[i]];
@@ -557,12 +626,8 @@ public:
             }
         }
     }
-    void deliver() { control_.deliver_due(); }
-    void advance(bool reverse) {
-        for (uint32_t ep = 0; ep < control_.endpoint_count(); ++ep)
-            control_.step_batcher(reverse ? control_.endpoint_count() - 1 - ep : ep);
-        control_.advance_tick();
-    }
+    void deliver() {}
+    void advance(bool) {}
     bool idle() const {
         if (!control_.idle()) return false;
         for (const auto &h : host_)
@@ -598,7 +663,10 @@ public:
         for (size_t i = 0; i < outcomes_.size(); ++i) {
             const auto &r = outcomes_[i];
             out << (i ? "," : "") << "{\"slot\":" << r.slot << ",\"generation\":" << r.generation << ",\"reason\":\""
-                << (r.capacity_stop ? "capacity_denied" : "released") << "\"}";
+                << (r.cancelled     ? "cancelled_before_activation" :
+                    r.capacity_stop ? "capacity_denied" :
+                                      "released")
+                << "\"}";
         }
         out << "]}\n";
         std::ofstream events(dir / "kv_events.jsonl");
