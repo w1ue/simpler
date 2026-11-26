@@ -1,0 +1,79 @@
+{
+  "scenario": "cancel_import",
+  "launches": 1,
+  "requests": {
+    "A": {
+      "tokens": [],
+      "hidden": [],
+      "reason": "cancelled_before_activation",
+      "emitted": 0
+    },
+    "B": {
+      "tokens": [
+        0,
+        59,
+        47,
+        23
+      ],
+      "hidden": [
+        765330,
+        530164,
+        196278,
+        148142
+      ],
+      "reason": "length",
+      "emitted": 4
+    },
+    "C": {
+      "tokens": [
+        39,
+        66
+      ],
+      "hidden": [
+        173184,
+        736199
+      ],
+      "reason": "length",
+      "emitted": 2
+    }
+  },
+  "allocations_before_launch": 246,
+  "physical_allocations_during_service": 0,
+  "per_token_serving_commands": 0,
+  "session_unloaded": true,
+  "all_cache_leases_returned": true,
+  "events": 28550,
+  "last_logical_tick": 3949,
+  "fixed_bytes_by_owner": {
+    "Bailu:0": 3072,
+    "Bailu:8": 3072,
+    "Host:0": 2304,
+    "SRAM:0": 7296,
+    "SRAM:1": 1024,
+    "SRAM:2": 1024,
+    "SRAM:3": 1024,
+    "SRAM:4": 1024,
+    "SRAM:9": 1024,
+    "SRAM:10": 1024,
+    "SRAM:11": 1024,
+    "SRAM:12": 1024,
+    "SRAM:5": 512,
+    "Host:8": 2176,
+    "SRAM:8": 7168,
+    "SRAM:13": 512,
+    "Batcher:0": 8192,
+    "Batcher:1": 8192,
+    "Batcher:2": 8192,
+    "Batcher:3": 8192,
+    "Batcher:4": 8192,
+    "Batcher:5": 8192,
+    "Batcher:6": 8192,
+    "Batcher:7": 8192
+  },
+  "limits": [
+    "isolated proposed protocol; not real serving/simpler integration",
+    "integer scalar decode; no full DeepSeek weights/attention/sampling",
+    "logical service model; no native WSE ISA, ABI or timing calibration",
+    "CPU metadata shadows; allowances do not prove native control layout"
+  ]
+}

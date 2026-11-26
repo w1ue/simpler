@@ -14,6 +14,12 @@ preallocated resources, fixed AICore control flow, Host page renewal and
 draining over actual WSE Memory and a bounded shared hardware-path model,
 with its own integer oracle.
 
+The [request-level persistent fixture](request_service/README.md) models a
+complete generation request across serving, Host simpler, a bounded Core
+program and transport. Its independent Python entry point checks request-level
+authorization, grouped page ownership, output delivery, slot reuse and drain;
+it does not connect the product serving stack or PyPTO compiler.
+
 ## Run and inspect
 
 Prerequisites: Linux or WSL, a C++17 compiler, CMake >= 3.16, and Python >= 3.9.

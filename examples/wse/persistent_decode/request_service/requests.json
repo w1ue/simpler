@@ -1,0 +1,57 @@
+{
+  "format": "wse.request_service.functional.v1",
+  "program": {
+    "id": "scalar40.twochips.twoslots",
+    "request_slots": 2,
+    "max_context": 512,
+    "cache_group_source_tokens": {
+      "window": 128,
+      "c2a": 256,
+      "c1a": 128
+    }
+  },
+  "requests": [
+    {
+      "request_id": "A",
+      "prompt_context": 127,
+      "seed": 11,
+      "max_new_tokens": 4,
+      "eos_token_id": 25,
+      "sampling": "scalar_mod97",
+      "policy_epoch": 1,
+      "cache_groups": [
+        "window",
+        "c2a",
+        "c1a"
+      ]
+    },
+    {
+      "request_id": "B",
+      "prompt_context": 255,
+      "seed": 18,
+      "max_new_tokens": 4,
+      "eos_token_id": null,
+      "sampling": "scalar_mod97",
+      "policy_epoch": 1,
+      "cache_groups": [
+        "window",
+        "c2a",
+        "c1a"
+      ]
+    },
+    {
+      "request_id": "C",
+      "prompt_context": 127,
+      "seed": 97,
+      "max_new_tokens": 2,
+      "eos_token_id": null,
+      "sampling": "scalar_mod97",
+      "policy_epoch": 1,
+      "cache_groups": [
+        "window",
+        "c2a",
+        "c1a"
+      ]
+    }
+  ]
+}

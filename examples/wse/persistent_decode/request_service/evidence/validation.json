@@ -1,0 +1,136 @@
+{
+  "format": "wse.request_service.functional.v1",
+  "positive": {
+    "normal": {
+      "passed": true,
+      "tokens": 8,
+      "layers": 320,
+      "transfers": 4565,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "slow_output": {
+      "passed": true,
+      "tokens": 8,
+      "layers": 320,
+      "transfers": 4565,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "slow_writeback": {
+      "passed": true,
+      "tokens": 8,
+      "layers": 320,
+      "transfers": 4565,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "slow_client": {
+      "passed": true,
+      "tokens": 8,
+      "layers": 320,
+      "transfers": 4565,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "cancel_import": {
+      "passed": true,
+      "tokens": 6,
+      "layers": 240,
+      "transfers": 3423,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "cancel_running": {
+      "passed": true,
+      "tokens": 6,
+      "layers": 240,
+      "transfers": 3434,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    },
+    "deny_refill": {
+      "passed": true,
+      "tokens": 3,
+      "layers": 120,
+      "transfers": 1734,
+      "oracle": "passed",
+      "budgets": "passed",
+      "lifecycle": "passed",
+      "request_protocol": "passed"
+    }
+  },
+  "negative": {
+    "unsupported_sampling": {
+      "rejected": true,
+      "diagnostic": "unsupported sampling capability"
+    },
+    "generation_over_budget": {
+      "rejected": true,
+      "diagnostic": "generation budget outside profile"
+    },
+    "incomplete_groups": {
+      "rejected": true,
+      "diagnostic": "incomplete grouped cache contract"
+    },
+    "submit_after_close": {
+      "rejected": true,
+      "diagnostic": "submit after CloseInput"
+    },
+    "runtime_allocation": {
+      "rejected": true,
+      "diagnostic": "device allocation after launch"
+    },
+    "duplicate_request": {
+      "rejected": true,
+      "diagnostic": "duplicate request registration"
+    },
+    "return_lease_with_import_inflight": {
+      "rejected": true,
+      "diagnostic": "lease release before DMA drain"
+    },
+    "overwrite_import_source": {
+      "rejected": true,
+      "diagnostic": "overwrite while DMA or delivery owns buffer"
+    },
+    "old_generation_output_credit": {
+      "rejected": true,
+      "diagnostic": "stale output credit generation"
+    },
+    "replace_live_page_prefix": {
+      "rejected": true,
+      "diagnostic": "grant replaces committed group prefix"
+    },
+    "exit_with_active_request": {
+      "rejected": true,
+      "diagnostic": "persistent kernel exit before request drain"
+    },
+    "atomic_reservation_exhaustion": {
+      "rejected": true,
+      "diagnostic": "reserve returned None without partial ownership changes"
+    }
+  },
+  "source_sha256": {
+    "device.py": "212e988117708b77c83786a92de46038a688daac22e986418ae6cf624c66dae3",
+    "model.py": "a3c9ab70b7e0b5234a83340bf5210fe3f6d551b0131b809be87f5a1bb2401e01",
+    "run_checks.py": "04e3a2b8c5f4c84eafce6b16dea00ad9a92dea4e1e6480042f605dc30a599f93",
+    "simulate.py": "cdf51a17e74489861e221bd06a7ca4599963d03816bc746e6155fa343298c176",
+    "transport.py": "e095a2231d7fffb8e356560d4d450bd0439fee9221d039f5c661916bea33a14b"
+  },
+  "input_sha256": "d1d582bce55815086fcb2e9ca05783a74bb7d0801abd59ef069099e87f4f6452",
+  "real_serving_integration": false,
+  "full_deepseek_model": false,
+  "native_hardware": false
+}

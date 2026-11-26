@@ -1,0 +1,1724 @@
+[
+  {
+    "handle": 0,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.0",
+    "bytes": 128
+  },
+  {
+    "handle": 1,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.1",
+    "bytes": 128
+  },
+  {
+    "handle": 2,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.2",
+    "bytes": 128
+  },
+  {
+    "handle": 3,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.3",
+    "bytes": 128
+  },
+  {
+    "handle": 4,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.4",
+    "bytes": 128
+  },
+  {
+    "handle": 5,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.5",
+    "bytes": 128
+  },
+  {
+    "handle": 6,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.6",
+    "bytes": 128
+  },
+  {
+    "handle": 7,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.window.7",
+    "bytes": 128
+  },
+  {
+    "handle": 8,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.0",
+    "bytes": 128
+  },
+  {
+    "handle": 9,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.1",
+    "bytes": 128
+  },
+  {
+    "handle": 10,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.2",
+    "bytes": 128
+  },
+  {
+    "handle": 11,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.3",
+    "bytes": 128
+  },
+  {
+    "handle": 12,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.4",
+    "bytes": 128
+  },
+  {
+    "handle": 13,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.5",
+    "bytes": 128
+  },
+  {
+    "handle": 14,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.6",
+    "bytes": 128
+  },
+  {
+    "handle": 15,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c2a.7",
+    "bytes": 128
+  },
+  {
+    "handle": 16,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.0",
+    "bytes": 128
+  },
+  {
+    "handle": 17,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.1",
+    "bytes": 128
+  },
+  {
+    "handle": 18,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.2",
+    "bytes": 128
+  },
+  {
+    "handle": 19,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.3",
+    "bytes": 128
+  },
+  {
+    "handle": 20,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.4",
+    "bytes": 128
+  },
+  {
+    "handle": 21,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.5",
+    "bytes": 128
+  },
+  {
+    "handle": 22,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.6",
+    "bytes": 128
+  },
+  {
+    "handle": 23,
+    "tier": "Bailu",
+    "owner": 0,
+    "name": "pool.0.c1a.7",
+    "bytes": 128
+  },
+  {
+    "handle": 24,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.0",
+    "bytes": 128
+  },
+  {
+    "handle": 25,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.1",
+    "bytes": 128
+  },
+  {
+    "handle": 26,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.2",
+    "bytes": 128
+  },
+  {
+    "handle": 27,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.3",
+    "bytes": 128
+  },
+  {
+    "handle": 28,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.4",
+    "bytes": 128
+  },
+  {
+    "handle": 29,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.5",
+    "bytes": 128
+  },
+  {
+    "handle": 30,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.6",
+    "bytes": 128
+  },
+  {
+    "handle": 31,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.window.7",
+    "bytes": 128
+  },
+  {
+    "handle": 32,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.0",
+    "bytes": 128
+  },
+  {
+    "handle": 33,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.1",
+    "bytes": 128
+  },
+  {
+    "handle": 34,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.2",
+    "bytes": 128
+  },
+  {
+    "handle": 35,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.3",
+    "bytes": 128
+  },
+  {
+    "handle": 36,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.4",
+    "bytes": 128
+  },
+  {
+    "handle": 37,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.5",
+    "bytes": 128
+  },
+  {
+    "handle": 38,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.6",
+    "bytes": 128
+  },
+  {
+    "handle": 39,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c2a.7",
+    "bytes": 128
+  },
+  {
+    "handle": 40,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.0",
+    "bytes": 128
+  },
+  {
+    "handle": 41,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.1",
+    "bytes": 128
+  },
+  {
+    "handle": 42,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.2",
+    "bytes": 128
+  },
+  {
+    "handle": 43,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.3",
+    "bytes": 128
+  },
+  {
+    "handle": 44,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.4",
+    "bytes": 128
+  },
+  {
+    "handle": 45,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.5",
+    "bytes": 128
+  },
+  {
+    "handle": 46,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.6",
+    "bytes": 128
+  },
+  {
+    "handle": 47,
+    "tier": "Bailu",
+    "owner": 8,
+    "name": "pool.1.c1a.7",
+    "bytes": 128
+  },
+  {
+    "handle": 48,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.snapshot.host",
+    "bytes": 128
+  },
+  {
+    "handle": 49,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.snapshot.core",
+    "bytes": 128
+  },
+  {
+    "handle": 50,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.activation.host",
+    "bytes": 512
+  },
+  {
+    "handle": 51,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.activation.core",
+    "bytes": 512
+  },
+  {
+    "handle": 52,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.grant.host",
+    "bytes": 512
+  },
+  {
+    "handle": 53,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.grant.core",
+    "bytes": 512
+  },
+  {
+    "handle": 54,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.credit.host",
+    "bytes": 128
+  },
+  {
+    "handle": 55,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.credit.core",
+    "bytes": 128
+  },
+  {
+    "handle": 56,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.cancel.host",
+    "bytes": 128
+  },
+  {
+    "handle": 57,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.cancel.core",
+    "bytes": 128
+  },
+  {
+    "handle": 58,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.low.core",
+    "bytes": 128
+  },
+  {
+    "handle": 59,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.low.host",
+    "bytes": 128
+  },
+  {
+    "handle": 60,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.grant_ack.core",
+    "bytes": 128
+  },
+  {
+    "handle": 61,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.grant_ack.host",
+    "bytes": 128
+  },
+  {
+    "handle": 62,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.finished.core",
+    "bytes": 128
+  },
+  {
+    "handle": 63,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.finished.host",
+    "bytes": 128
+  },
+  {
+    "handle": 64,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.drained.core",
+    "bytes": 128
+  },
+  {
+    "handle": 65,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.drained.host",
+    "bytes": 128
+  },
+  {
+    "handle": 66,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.fetch",
+    "bytes": 128
+  },
+  {
+    "handle": 67,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.frame",
+    "bytes": 512
+  },
+  {
+    "handle": 68,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty0.window",
+    "bytes": 128
+  },
+  {
+    "handle": 69,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty0.c2a",
+    "bytes": 128
+  },
+  {
+    "handle": 70,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty0.c1a",
+    "bytes": 128
+  },
+  {
+    "handle": 71,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty1.window",
+    "bytes": 128
+  },
+  {
+    "handle": 72,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty1.c2a",
+    "bytes": 128
+  },
+  {
+    "handle": 73,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.dirty1.c1a",
+    "bytes": 128
+  },
+  {
+    "handle": 74,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.output0",
+    "bytes": 128
+  },
+  {
+    "handle": 75,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.output1",
+    "bytes": 128
+  },
+  {
+    "handle": 76,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.output0.host",
+    "bytes": 128
+  },
+  {
+    "handle": 77,
+    "tier": "Host",
+    "owner": 0,
+    "name": "slot0.output1.host",
+    "bytes": 128
+  },
+  {
+    "handle": 78,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send0",
+    "bytes": 128
+  },
+  {
+    "handle": 79,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result0",
+    "bytes": 128
+  },
+  {
+    "handle": 80,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send1",
+    "bytes": 128
+  },
+  {
+    "handle": 81,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result1",
+    "bytes": 128
+  },
+  {
+    "handle": 82,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send2",
+    "bytes": 128
+  },
+  {
+    "handle": 83,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result2",
+    "bytes": 128
+  },
+  {
+    "handle": 84,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send3",
+    "bytes": 128
+  },
+  {
+    "handle": 85,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result3",
+    "bytes": 128
+  },
+  {
+    "handle": 86,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send4",
+    "bytes": 128
+  },
+  {
+    "handle": 87,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result4",
+    "bytes": 128
+  },
+  {
+    "handle": 88,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send5",
+    "bytes": 128
+  },
+  {
+    "handle": 89,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result5",
+    "bytes": 128
+  },
+  {
+    "handle": 90,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.send6",
+    "bytes": 128
+  },
+  {
+    "handle": 91,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank0.result6",
+    "bytes": 128
+  },
+  {
+    "handle": 92,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot0.bank0.e0.input",
+    "bytes": 128
+  },
+  {
+    "handle": 93,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot0.bank0.e0.output",
+    "bytes": 128
+  },
+  {
+    "handle": 94,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot0.bank0.e1.input",
+    "bytes": 128
+  },
+  {
+    "handle": 95,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot0.bank0.e1.output",
+    "bytes": 128
+  },
+  {
+    "handle": 96,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot0.bank0.e2.input",
+    "bytes": 128
+  },
+  {
+    "handle": 97,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot0.bank0.e2.output",
+    "bytes": 128
+  },
+  {
+    "handle": 98,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot0.bank0.e3.input",
+    "bytes": 128
+  },
+  {
+    "handle": 99,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot0.bank0.e3.output",
+    "bytes": 128
+  },
+  {
+    "handle": 100,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot0.bank0.e4.input",
+    "bytes": 128
+  },
+  {
+    "handle": 101,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot0.bank0.e4.output",
+    "bytes": 128
+  },
+  {
+    "handle": 102,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot0.bank0.e5.input",
+    "bytes": 128
+  },
+  {
+    "handle": 103,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot0.bank0.e5.output",
+    "bytes": 128
+  },
+  {
+    "handle": 104,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot0.bank0.e6.input",
+    "bytes": 128
+  },
+  {
+    "handle": 105,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot0.bank0.e6.output",
+    "bytes": 128
+  },
+  {
+    "handle": 106,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot0.bank0.e7.input",
+    "bytes": 128
+  },
+  {
+    "handle": 107,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot0.bank0.e7.output",
+    "bytes": 128
+  },
+  {
+    "handle": 108,
+    "tier": "SRAM",
+    "owner": 5,
+    "name": "slot0.bank0.e8.input",
+    "bytes": 128
+  },
+  {
+    "handle": 109,
+    "tier": "SRAM",
+    "owner": 5,
+    "name": "slot0.bank0.e8.output",
+    "bytes": 128
+  },
+  {
+    "handle": 110,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send0",
+    "bytes": 128
+  },
+  {
+    "handle": 111,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result0",
+    "bytes": 128
+  },
+  {
+    "handle": 112,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send1",
+    "bytes": 128
+  },
+  {
+    "handle": 113,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result1",
+    "bytes": 128
+  },
+  {
+    "handle": 114,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send2",
+    "bytes": 128
+  },
+  {
+    "handle": 115,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result2",
+    "bytes": 128
+  },
+  {
+    "handle": 116,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send3",
+    "bytes": 128
+  },
+  {
+    "handle": 117,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result3",
+    "bytes": 128
+  },
+  {
+    "handle": 118,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send4",
+    "bytes": 128
+  },
+  {
+    "handle": 119,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result4",
+    "bytes": 128
+  },
+  {
+    "handle": 120,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send5",
+    "bytes": 128
+  },
+  {
+    "handle": 121,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result5",
+    "bytes": 128
+  },
+  {
+    "handle": 122,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.send6",
+    "bytes": 128
+  },
+  {
+    "handle": 123,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "slot0.bank1.result6",
+    "bytes": 128
+  },
+  {
+    "handle": 124,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot0.bank1.e0.input",
+    "bytes": 128
+  },
+  {
+    "handle": 125,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot0.bank1.e0.output",
+    "bytes": 128
+  },
+  {
+    "handle": 126,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot0.bank1.e1.input",
+    "bytes": 128
+  },
+  {
+    "handle": 127,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot0.bank1.e1.output",
+    "bytes": 128
+  },
+  {
+    "handle": 128,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot0.bank1.e2.input",
+    "bytes": 128
+  },
+  {
+    "handle": 129,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot0.bank1.e2.output",
+    "bytes": 128
+  },
+  {
+    "handle": 130,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot0.bank1.e3.input",
+    "bytes": 128
+  },
+  {
+    "handle": 131,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot0.bank1.e3.output",
+    "bytes": 128
+  },
+  {
+    "handle": 132,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot0.bank1.e4.input",
+    "bytes": 128
+  },
+  {
+    "handle": 133,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot0.bank1.e4.output",
+    "bytes": 128
+  },
+  {
+    "handle": 134,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot0.bank1.e5.input",
+    "bytes": 128
+  },
+  {
+    "handle": 135,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot0.bank1.e5.output",
+    "bytes": 128
+  },
+  {
+    "handle": 136,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot0.bank1.e6.input",
+    "bytes": 128
+  },
+  {
+    "handle": 137,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot0.bank1.e6.output",
+    "bytes": 128
+  },
+  {
+    "handle": 138,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot0.bank1.e7.input",
+    "bytes": 128
+  },
+  {
+    "handle": 139,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot0.bank1.e7.output",
+    "bytes": 128
+  },
+  {
+    "handle": 140,
+    "tier": "SRAM",
+    "owner": 5,
+    "name": "slot0.bank1.e8.input",
+    "bytes": 128
+  },
+  {
+    "handle": 141,
+    "tier": "SRAM",
+    "owner": 5,
+    "name": "slot0.bank1.e8.output",
+    "bytes": 128
+  },
+  {
+    "handle": 142,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.snapshot.host",
+    "bytes": 128
+  },
+  {
+    "handle": 143,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.snapshot.core",
+    "bytes": 128
+  },
+  {
+    "handle": 144,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.activation.host",
+    "bytes": 512
+  },
+  {
+    "handle": 145,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.activation.core",
+    "bytes": 512
+  },
+  {
+    "handle": 146,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.grant.host",
+    "bytes": 512
+  },
+  {
+    "handle": 147,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.grant.core",
+    "bytes": 512
+  },
+  {
+    "handle": 148,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.credit.host",
+    "bytes": 128
+  },
+  {
+    "handle": 149,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.credit.core",
+    "bytes": 128
+  },
+  {
+    "handle": 150,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.cancel.host",
+    "bytes": 128
+  },
+  {
+    "handle": 151,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.cancel.core",
+    "bytes": 128
+  },
+  {
+    "handle": 152,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.low.core",
+    "bytes": 128
+  },
+  {
+    "handle": 153,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.low.host",
+    "bytes": 128
+  },
+  {
+    "handle": 154,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.grant_ack.core",
+    "bytes": 128
+  },
+  {
+    "handle": 155,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.grant_ack.host",
+    "bytes": 128
+  },
+  {
+    "handle": 156,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.finished.core",
+    "bytes": 128
+  },
+  {
+    "handle": 157,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.finished.host",
+    "bytes": 128
+  },
+  {
+    "handle": 158,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.drained.core",
+    "bytes": 128
+  },
+  {
+    "handle": 159,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.drained.host",
+    "bytes": 128
+  },
+  {
+    "handle": 160,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.fetch",
+    "bytes": 128
+  },
+  {
+    "handle": 161,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.frame",
+    "bytes": 512
+  },
+  {
+    "handle": 162,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty0.window",
+    "bytes": 128
+  },
+  {
+    "handle": 163,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty0.c2a",
+    "bytes": 128
+  },
+  {
+    "handle": 164,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty0.c1a",
+    "bytes": 128
+  },
+  {
+    "handle": 165,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty1.window",
+    "bytes": 128
+  },
+  {
+    "handle": 166,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty1.c2a",
+    "bytes": 128
+  },
+  {
+    "handle": 167,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.dirty1.c1a",
+    "bytes": 128
+  },
+  {
+    "handle": 168,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.output0",
+    "bytes": 128
+  },
+  {
+    "handle": 169,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.output1",
+    "bytes": 128
+  },
+  {
+    "handle": 170,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.output0.host",
+    "bytes": 128
+  },
+  {
+    "handle": 171,
+    "tier": "Host",
+    "owner": 8,
+    "name": "slot1.output1.host",
+    "bytes": 128
+  },
+  {
+    "handle": 172,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send0",
+    "bytes": 128
+  },
+  {
+    "handle": 173,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result0",
+    "bytes": 128
+  },
+  {
+    "handle": 174,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send1",
+    "bytes": 128
+  },
+  {
+    "handle": 175,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result1",
+    "bytes": 128
+  },
+  {
+    "handle": 176,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send2",
+    "bytes": 128
+  },
+  {
+    "handle": 177,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result2",
+    "bytes": 128
+  },
+  {
+    "handle": 178,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send3",
+    "bytes": 128
+  },
+  {
+    "handle": 179,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result3",
+    "bytes": 128
+  },
+  {
+    "handle": 180,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send4",
+    "bytes": 128
+  },
+  {
+    "handle": 181,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result4",
+    "bytes": 128
+  },
+  {
+    "handle": 182,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send5",
+    "bytes": 128
+  },
+  {
+    "handle": 183,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result5",
+    "bytes": 128
+  },
+  {
+    "handle": 184,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.send6",
+    "bytes": 128
+  },
+  {
+    "handle": 185,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank0.result6",
+    "bytes": 128
+  },
+  {
+    "handle": 186,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot1.bank0.e0.input",
+    "bytes": 128
+  },
+  {
+    "handle": 187,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot1.bank0.e0.output",
+    "bytes": 128
+  },
+  {
+    "handle": 188,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot1.bank0.e1.input",
+    "bytes": 128
+  },
+  {
+    "handle": 189,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot1.bank0.e1.output",
+    "bytes": 128
+  },
+  {
+    "handle": 190,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot1.bank0.e2.input",
+    "bytes": 128
+  },
+  {
+    "handle": 191,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot1.bank0.e2.output",
+    "bytes": 128
+  },
+  {
+    "handle": 192,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot1.bank0.e3.input",
+    "bytes": 128
+  },
+  {
+    "handle": 193,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot1.bank0.e3.output",
+    "bytes": 128
+  },
+  {
+    "handle": 194,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot1.bank0.e4.input",
+    "bytes": 128
+  },
+  {
+    "handle": 195,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot1.bank0.e4.output",
+    "bytes": 128
+  },
+  {
+    "handle": 196,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot1.bank0.e5.input",
+    "bytes": 128
+  },
+  {
+    "handle": 197,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot1.bank0.e5.output",
+    "bytes": 128
+  },
+  {
+    "handle": 198,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot1.bank0.e6.input",
+    "bytes": 128
+  },
+  {
+    "handle": 199,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot1.bank0.e6.output",
+    "bytes": 128
+  },
+  {
+    "handle": 200,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot1.bank0.e7.input",
+    "bytes": 128
+  },
+  {
+    "handle": 201,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot1.bank0.e7.output",
+    "bytes": 128
+  },
+  {
+    "handle": 202,
+    "tier": "SRAM",
+    "owner": 13,
+    "name": "slot1.bank0.e8.input",
+    "bytes": 128
+  },
+  {
+    "handle": 203,
+    "tier": "SRAM",
+    "owner": 13,
+    "name": "slot1.bank0.e8.output",
+    "bytes": 128
+  },
+  {
+    "handle": 204,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send0",
+    "bytes": 128
+  },
+  {
+    "handle": 205,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result0",
+    "bytes": 128
+  },
+  {
+    "handle": 206,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send1",
+    "bytes": 128
+  },
+  {
+    "handle": 207,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result1",
+    "bytes": 128
+  },
+  {
+    "handle": 208,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send2",
+    "bytes": 128
+  },
+  {
+    "handle": 209,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result2",
+    "bytes": 128
+  },
+  {
+    "handle": 210,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send3",
+    "bytes": 128
+  },
+  {
+    "handle": 211,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result3",
+    "bytes": 128
+  },
+  {
+    "handle": 212,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send4",
+    "bytes": 128
+  },
+  {
+    "handle": 213,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result4",
+    "bytes": 128
+  },
+  {
+    "handle": 214,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send5",
+    "bytes": 128
+  },
+  {
+    "handle": 215,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result5",
+    "bytes": 128
+  },
+  {
+    "handle": 216,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.send6",
+    "bytes": 128
+  },
+  {
+    "handle": 217,
+    "tier": "SRAM",
+    "owner": 8,
+    "name": "slot1.bank1.result6",
+    "bytes": 128
+  },
+  {
+    "handle": 218,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot1.bank1.e0.input",
+    "bytes": 128
+  },
+  {
+    "handle": 219,
+    "tier": "SRAM",
+    "owner": 1,
+    "name": "slot1.bank1.e0.output",
+    "bytes": 128
+  },
+  {
+    "handle": 220,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot1.bank1.e1.input",
+    "bytes": 128
+  },
+  {
+    "handle": 221,
+    "tier": "SRAM",
+    "owner": 2,
+    "name": "slot1.bank1.e1.output",
+    "bytes": 128
+  },
+  {
+    "handle": 222,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot1.bank1.e2.input",
+    "bytes": 128
+  },
+  {
+    "handle": 223,
+    "tier": "SRAM",
+    "owner": 3,
+    "name": "slot1.bank1.e2.output",
+    "bytes": 128
+  },
+  {
+    "handle": 224,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot1.bank1.e3.input",
+    "bytes": 128
+  },
+  {
+    "handle": 225,
+    "tier": "SRAM",
+    "owner": 4,
+    "name": "slot1.bank1.e3.output",
+    "bytes": 128
+  },
+  {
+    "handle": 226,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot1.bank1.e4.input",
+    "bytes": 128
+  },
+  {
+    "handle": 227,
+    "tier": "SRAM",
+    "owner": 9,
+    "name": "slot1.bank1.e4.output",
+    "bytes": 128
+  },
+  {
+    "handle": 228,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot1.bank1.e5.input",
+    "bytes": 128
+  },
+  {
+    "handle": 229,
+    "tier": "SRAM",
+    "owner": 10,
+    "name": "slot1.bank1.e5.output",
+    "bytes": 128
+  },
+  {
+    "handle": 230,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot1.bank1.e6.input",
+    "bytes": 128
+  },
+  {
+    "handle": 231,
+    "tier": "SRAM",
+    "owner": 11,
+    "name": "slot1.bank1.e6.output",
+    "bytes": 128
+  },
+  {
+    "handle": 232,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot1.bank1.e7.input",
+    "bytes": 128
+  },
+  {
+    "handle": 233,
+    "tier": "SRAM",
+    "owner": 12,
+    "name": "slot1.bank1.e7.output",
+    "bytes": 128
+  },
+  {
+    "handle": 234,
+    "tier": "SRAM",
+    "owner": 13,
+    "name": "slot1.bank1.e8.input",
+    "bytes": 128
+  },
+  {
+    "handle": 235,
+    "tier": "SRAM",
+    "owner": 13,
+    "name": "slot1.bank1.e8.output",
+    "bytes": 128
+  },
+  {
+    "handle": 236,
+    "tier": "Host",
+    "owner": 0,
+    "name": "session.stop.host",
+    "bytes": 128
+  },
+  {
+    "handle": 237,
+    "tier": "SRAM",
+    "owner": 0,
+    "name": "session.stop.core",
+    "bytes": 128
+  },
+  {
+    "handle": 238,
+    "tier": "Batcher",
+    "owner": 0,
+    "name": "batcher0.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 239,
+    "tier": "Batcher",
+    "owner": 1,
+    "name": "batcher1.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 240,
+    "tier": "Batcher",
+    "owner": 2,
+    "name": "batcher2.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 241,
+    "tier": "Batcher",
+    "owner": 3,
+    "name": "batcher3.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 242,
+    "tier": "Batcher",
+    "owner": 4,
+    "name": "batcher4.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 243,
+    "tier": "Batcher",
+    "owner": 5,
+    "name": "batcher5.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 244,
+    "tier": "Batcher",
+    "owner": 6,
+    "name": "batcher6.control_allowance",
+    "bytes": 8192
+  },
+  {
+    "handle": 245,
+    "tier": "Batcher",
+    "owner": 7,
+    "name": "batcher7.control_allowance",
+    "bytes": 8192
+  }
+]
